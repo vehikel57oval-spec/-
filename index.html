@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>隔日勤務（24時間2交代）勤務表自動生成システム</title>
+    <!-- Google Fonts: Inter & Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="app-header no-print">
+        <div class="header-logo">
+            <svg class="header-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M19 4H5C3.89543 4 3 4.89543 3 6V20C3 21.1046 3.89543 22 5 22H19C20.1046 22 21 21.1046 21 20V6C21 4.89543 20.1046 4 19 4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                <path d="M16 2V6M8 2V6M3 10H21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M8 14H12V18H8V14Z" fill="currentColor"/>
+            </svg>
+            <h1>隔日勤務 2交代 勤務表自動生成</h1>
+        </div>
+        <div class="header-controls">
+            <button id="btn-theme-toggle" class="btn btn-icon" title="テーマ切り替え" aria-label="テーマ切り替え">
+                <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            </button>
+            <button id="btn-save" class="btn btn-secondary">設定保存</button>
+            <button id="btn-load" class="btn btn-secondary">設定読込</button>
+            <input type="file" id="file-loader" style="display: none;" accept=".json">
+        </div>
+    </header>
+
+    <main class="app-container">
+        <!-- 設定パネル (サイドバー) -->
+        <aside class="settings-sidebar no-print">
+            <section class="card settings-card">
+                <h2>1. 基本設定</h2>
+                <div class="form-group">
+                    <label for="input-station">署所名</label>
+                    <input type="text" id="input-station" class="form-control" list="station-list" value="本署" placeholder="例：本署、東分署">
+                    <datalist id="station-list">
+                        <option value="本署">
+                        <option value="東分署">
+                        <option value="南分署">
+                        <option value="北分署">
+                        <option value="西出張所">
+                    </datalist>
+                </div>
+                <div class="form-group">
+                    <label for="input-start-date">起算日（開始日）</label>
+                    <input type="date" id="input-start-date" class="form-control">
+                </div>
+                <div class="form-group no-print">
+                    <label for="input-platoon-size">小隊人数（片方の小隊）</label>
+                    <input type="number" id="input-platoon-size" class="form-control" min="1" max="50" value="19">
+                </div>
+                <div class="form-group no-print">
+                    <label for="input-min-staffing">最低確保人員（出勤人数）</label>
+                    <input type="number" id="input-min-staffing" class="form-control" min="1" max="100" value="11">
+                </div>
+                <div class="form-group">
+                    <label for="select-cycle">表示サイクル</label>
+                    <select id="select-cycle" class="form-control">
+                        <option value="1">第1サイクル</option>
+                        <option value="2">第2サイクル</option>
+                        <option value="3">第3サイクル</option>
+                        <option value="4">第4サイクル</option>
+                        <option value="5">第5サイクル</option>
+                        <option value="6">第6サイクル</option>
+                        <option value="7">第7サイクル</option>
+                        <option value="8">第8サイクル</option>
+                        <option value="9">第9サイクル</option>
+                        <option value="10">第10サイクル</option>
+                        <option value="11">第11サイクル</option>
+                        <option value="12">第12サイクル</option>
+                        <option value="13">第13サイクル</option>
+                    </select>
+                </div>
+                <div class="cycle-period-info">
+                    <span class="info-label">対象期間 (28日間):</span>
+                    <span id="label-cycle-range" class="info-value">-</span>
+                </div>
+            </section>
+
+            <section class="card settings-card no-print">
+                <h2>1.5. 勤務シフトの設定</h2>
+                <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">各シフトの表示文字や背景・文字色を編集できます。※「当/非/休」は変更できません。</p>
+                <div id="shift-config-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; padding-right: 4px;">
+                    <!-- JSで動的に設定行を挿入 -->
+                </div>
+                <button id="btn-add-shift" class="btn btn-secondary btn-block" style="margin-top: 8px; font-size: 11px; padding: 6px 12px; height: auto;">＋ 新規シフトを追加</button>
+            </section>
+
+            <section class="card settings-card">
+                <h2>2. 小隊メンバー登録</h2>
+                <div class="platoon-tabs">
+                    <button class="platoon-tab-btn active" data-platoon="1">第1小隊</button>
+                    <button class="platoon-tab-btn" data-platoon="2">第2小隊</button>
+                </div>
+                
+                <div id="platoon-1-members" class="platoon-members-inputs">
+                    <!-- 第1小隊メンバー名インプット (8名) -->
+                </div>
+                <div id="platoon-2-members" class="platoon-members-inputs" style="display: none;">
+                    <!-- 第2小隊メンバー名インプット (8名) -->
+                </div>
+            </section>
+
+            <div class="action-buttons">
+                <button id="btn-generate" class="btn btn-primary btn-block">
+                    <span class="btn-text">勤務表を自動生成</span>
+                    <span class="spinner" style="display: none;"></span>
+                </button>
+                <button id="btn-csv" class="btn btn-secondary btn-block">CSVエクスポート</button>
+                <button id="btn-print" class="btn btn-secondary btn-block">印刷プレビュー</button>
+            </div>
+        </aside>
+
+        <!-- メイン表示領域 -->
+        <div class="content-area">
+            <!-- 警告表示エリア -->
+            <div id="alert-container" class="alert-container no-print" style="display: none;">
+                <div class="alert-header">
+                    <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <h3>勤務ルールの警告があります</h3>
+                </div>
+                <ul id="alert-list" class="alert-list"></ul>
+            </div>
+
+            <!-- 表示モード切り替えタブ -->
+            <div class="view-tabs no-print">
+                <button class="view-tab-btn active" data-tab="tab-list">勤務一覧（編集・統計）</button>
+                <button class="view-tab-btn" data-tab="tab-calendar">カレンダー表示</button>
+                <button class="view-tab-btn" data-tab="tab-hope">事前指定（希望シフト）</button>
+            </div>
+
+            <!-- タブ1: 勤務一覧表 (統計・編集) -->
+            <section id="tab-list" class="tab-content card active-tab">
+                <div class="tab-header">
+                    <h2>勤務一覧（スプレッドシート型）</h2>
+                    <p class="tab-description no-print">セルをクリックするとシフトを手動で変更できます。右端に各スタッフの勤務統計が表示されます。</p>
+                </div>
+                
+                <div id="roster-tables-container">
+                    <!-- 小隊ごとのテーブルが動的に生成されます -->
+                </div>
+
+                <div id="roster-legend" class="legend no-print">
+                    <!-- ここに凡例が動的に生成されます -->
+                </div>
+            </section>
+
+            <!-- タブ2: カレンダー表示 -->
+            <section id="tab-calendar" class="tab-content card">
+                <div class="tab-header no-print">
+                    <h2>カレンダー表示</h2>
+                    <p class="tab-description">日ごとの出勤メンバー（当番）をカレンダー形式で確認・印刷できます。</p>
+                </div>
+                
+                <div class="print-only-header">
+                    <h2 id="print-header-title">勤務表（隔日勤務 2交代）</h2>
+                    <p>期間: <span id="print-date-range"></span></p>
+                </div>
+
+                <div id="calendar-grid-container" class="calendar-layout">
+                    <!-- 週ごとのカレンダーグリッドが生成される -->
+                </div>
+
+                <div class="print-footer print-only">
+                    <div class="signature-boxes">
+                        <div class="sig-box">承認</div>
+                        <div class="sig-box">検印</div>
+                        <div class="sig-box">作成者</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- タブ3: 事前指定（希望シフト）の設定 -->
+            <section id="tab-hope" class="tab-content card">
+                <div class="tab-header">
+                    <h2>事前指定（希望シフト）の設定</h2>
+                    <p class="tab-description">自動生成を行う前に、あらかじめ週休・年休・出張・病休などを指定したい日をクリックして設定してください。</p>
+                </div>
+                <div class="hope-actions no-print">
+                    <button id="btn-clear-hope" class="btn btn-secondary">事前設定をすべてクリア</button>
+                    <span class="hope-hint">※セルをクリックすると、事前指定シフトを選択するポップアップが表示されます。</span>
+                </div>
+
+                <div id="hope-tables-container">
+                    <!-- 小隊ごとの希望休テーブルが動的に生成されます -->
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer class="app-footer no-print">
+        <p>&copy; 2026 隔日勤務シフト自動生成システム</p>
+    </footer>
+
+    <!-- シフト変更用ポップアップ（手動編集・事前指定用） -->
+    <div id="shift-modal" class="modal no-print" style="display: none;">
+        <div class="modal-content">
+            <h4 id="modal-title">シフト変更</h4>
+            
+            <!-- 期間指定用の入力欄 -->
+            <div class="modal-range-selector" style="display: flex; align-items: center; gap: 8px; font-size: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 8px;">
+                <span>適用期間:</span>
+                <span id="modal-start-day-label" style="font-weight: 600;">-</span>日目
+                <span>〜</span>
+                <input type="number" id="modal-end-day-input" class="form-control" min="1" max="28" style="width: 65px; padding: 4px 8px; height: 26px;" placeholder="当日">日目
+            </div>
+
+            <div id="modal-shift-buttons" class="modal-buttons" style="margin-bottom: 8px;">
+                <!-- ここにシフト選択ボタンが動的に生成されます -->
+            </div>
+            <div class="modal-buttons">
+                <button id="btn-modal-clear" class="btn btn-modal" style="background-color: var(--secondary-bg); color: var(--color-wday-sun); border-color: var(--border-color); display: none; width: 100%;"><span class="badge" style="background-color: transparent; color: var(--color-wday-sun);">×</span> 指定を解除 (クリア)</button>
+                <button id="btn-modal-cancel" class="btn btn-secondary" style="width: 100%;">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- スクリプトの読み込み -->
+    <script src="scheduler.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
