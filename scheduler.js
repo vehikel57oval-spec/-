@@ -58,7 +58,21 @@ function getBlockIndex(platoon, dayIndex) {
  * @param {number} maxH 各ブロックの最大休日数 (H)
  * @param {Array} platoonStaff 小隊メンバー情報（階級・資格を含む）
  */
-function solvePlatoon(candidates, minH, maxH, platoonStaff) {
+/**
+ * 応援職員（isSupport: true）が特定の14ブロックのサイクルにおいて勤務日であるかを判定する
+ */
+function isSupportStaffWorkingOnBlock(s, k, startDate) {
+    const dutyDayOffset = s.platoon === 1 ? 2 * k : 2 * k + 1;
+    const dutyDate = new Date(startDate);
+    dutyDate.setDate(startDate.getDate() + dutyDayOffset);
+    const y = dutyDate.getFullYear();
+    const m = String(dutyDate.getMonth() + 1).padStart(2, '0');
+    const d = String(dutyDate.getDate()).padStart(2, '0');
+    const dayStr = `${y}-${m}-${d}`;
+    return dayStr >= s.supportStart && dayStr <= s.supportEnd;
+}
+
+function solvePlatoon(candidates, minH, maxH, platoonStaff, supportStaff = [], startDate = null, minSubOfficer = 1, minLarge = 1, minParamedic = 1) {
     const n = candidates.length;
     const assignment = new Array(n);
     const hCounts = new Array(14).fill(0);
@@ -74,14 +88,24 @@ function solvePlatoon(candidates, minH, maxH, platoonStaff) {
         }
     }
 
-    // 小隊内の保有資格数のカウント
+    // 小隊内の保有資格数のカウント（正規職員＋応援職員の合算）
     let totalOfficers = 0;
+    let totalSubOfficers = 0;
     let totalLarge = 0;
     let totalParamedics = 0;
     let totalRescue = 0;
     
     platoonStaff.forEach(s => {
         if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) totalOfficers++;
+        if (["消防司令", "消防司令補"].includes(s.rank)) totalSubOfficers++;
+        if (s.hasLargeLicense) totalLarge++;
+        if (s.isParamedic) totalParamedics++;
+        if (s.isRescue) totalRescue++;
+    });
+
+    supportStaff.forEach(s => {
+        if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) totalOfficers++;
+        if (["消防司令", "消防司令補"].includes(s.rank)) totalSubOfficers++;
         if (s.hasLargeLicense) totalLarge++;
         if (s.isParamedic) totalParamedics++;
         if (s.isRescue) totalRescue++;
@@ -89,20 +113,23 @@ function solvePlatoon(candidates, minH, maxH, platoonStaff) {
 
     // 1日あたりの必要人員目標（メンバー総数が少なすぎる場合は、総数を上限とする）
     const targetOfficers = Math.min(2, totalOfficers);
-    const targetLarge = Math.min(2, totalLarge);
-    const targetParamedics = Math.min(2, totalParamedics);
+    const targetSubOfficers = Math.min(minSubOfficer, totalSubOfficers);
+    const targetLarge = Math.min(minLarge, totalLarge);
+    const targetParamedics = Math.min(minParamedic, totalParamedics);
     const targetRescue = Math.min(2, totalRescue);
     
     // 競合評価関数 (ペナルティスコア)
     function getScore() {
-        let score = 0;
+        let hardScore = 0;
+        let softScore = 0;
         for (let k = 0; k < 14; k++) {
             // 休日数（出勤人員総数）の制約：超重要（ペナルティ10倍）
-            if (hCounts[k] < minH) score += (minH - hCounts[k]) * 10;
-            if (hCounts[k] > maxH) score += (hCounts[k] - maxH) * 10;
+            if (hCounts[k] < minH) hardScore += (minH - hCounts[k]) * 10;
+            if (hCounts[k] > maxH) hardScore += (hCounts[k] - maxH) * 10;
             
             // 資格・階級の出勤人数バランス
             let officers = 0;
+            let subOfficers = 0;
             let large = 0;
             let paramedics = 0;
             let rescue = 0;
@@ -111,31 +138,49 @@ function solvePlatoon(candidates, minH, maxH, platoonStaff) {
                 if (assignment[i] && assignment[i][k] === 0) { // 勤務（当）
                     const s = platoonStaff[i];
                     if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) officers++;
+                    if (["消防司令", "消防司令補"].includes(s.rank)) subOfficers++;
                     if (s.hasLargeLicense) large++;
                     if (s.isParamedic) paramedics++;
                     if (s.isRescue) rescue++;
                 }
             }
+
+            // 応援職員の勤務資格加算
+            if (startDate) {
+                supportStaff.forEach(s => {
+                    if (isSupportStaffWorkingOnBlock(s, k, startDate)) {
+                        if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) officers++;
+                        if (["消防司令", "消防司令補"].includes(s.rank)) subOfficers++;
+                        if (s.hasLargeLicense) large++;
+                        if (s.isParamedic) paramedics++;
+                        if (s.isRescue) rescue++;
+                    }
+                });
+            }
             
-            if (officers < targetOfficers) score += (targetOfficers - officers) * 5;
-            if (large < targetLarge) score += (targetLarge - large) * 5;
-            if (paramedics < targetParamedics) score += (targetParamedics - paramedics) * 5;
-            if (rescue < targetRescue) score += (targetRescue - rescue) * 5;
+            if (subOfficers < targetSubOfficers) softScore += (targetSubOfficers - subOfficers) * 5;
+            if (officers < targetOfficers) softScore += (targetOfficers - officers) * 5;
+            if (large < targetLarge) softScore += (targetLarge - large) * 5;
+            if (paramedics < targetParamedics) softScore += (targetParamedics - paramedics) * 5;
+            if (rescue < targetRescue) softScore += (targetRescue - rescue) * 5;
         }
-        return score;
+        return { hard: hardScore, soft: softScore, total: hardScore + softScore };
     }
 
     let bestAssignment = [...assignment];
-    let bestScore = getScore();
+    let bestRes = getScore();
+    let bestTotalScore = bestRes.total;
+    let bestHardScore = bestRes.hard;
     
     // 最大ステップ数を5000に制限し、ブラウザのフリーズを確実に防止
     const maxSteps = 5000;
     for (let step = 0; step < maxSteps; step++) {
-        const score = getScore();
-        if (score === 0) return assignment; // 競合ゼロなら即終了
+        const res = getScore();
+        if (res.total === 0) return assignment; // 競合ゼロなら即終了
 
-        if (score < bestScore) {
-            bestScore = score;
+        if (res.total < bestTotalScore) {
+            bestTotalScore = res.total;
+            bestHardScore = res.hard;
             bestAssignment = [...assignment];
         }
         
@@ -160,11 +205,11 @@ function solvePlatoon(candidates, minH, maxH, platoonStaff) {
             }
             assignment[employeeIdx] = seq;
             
-            const tempScore = getScore();
-            if (tempScore < minScore) {
-                minScore = tempScore;
+            const tempRes = getScore();
+            if (tempRes.total < minScore) {
+                minScore = tempRes.total;
                 bestCandidates = [seq];
-            } else if (tempScore === minScore) {
+            } else if (tempRes.total === minScore) {
                 bestCandidates.push(seq);
             }
             
@@ -187,9 +232,9 @@ function solvePlatoon(candidates, minH, maxH, platoonStaff) {
         assignment[employeeIdx] = chosenSeq;
     }
 
-    // スコアが0にならなくても、休日数（日ごとの人員数のハード部分）が満たされていれば、
+    // ハードな休日数制約（人員数のハード部分）が満たされていれば、
     // 見つかった最も良い割り当て（資格バランスが最良のもの）を返します。
-    if (bestScore < 10) {
+    if (bestHardScore === 0) {
         // カウンターをbestAssignmentの状態に復元して戻す
         for (let k = 0; k < 14; k++) {
             hCounts[k] = 0;
@@ -213,15 +258,19 @@ function solvePlatoon(candidates, minH, maxH, platoonStaff) {
  * @param {Object} hopeShifts 希望休情報 (staffId -> dayIndex -> '休')
  * @param {number} minStaffing 最低確保人員
  */
-function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11) {
+function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11, minSubOfficer = 1, minLarge = 1, minParamedic = 1) {
+    // 応援職員と正規職員を分離
+    const regularStaff = staffList.filter(s => !s.isSupport);
+    const supportStaff = staffList.filter(s => s.isSupport);
+
     // 小隊ごとにスタッフを分割
-    const platoon1 = staffList.filter(s => s.platoon === 1);
-    const platoon2 = staffList.filter(s => s.platoon === 2);
+    const platoon1 = regularStaff.filter(s => s.platoon === 1);
+    const platoon2 = regularStaff.filter(s => s.platoon === 2);
     
     if (platoon1.length !== platoon2.length) {
         return {
             success: false,
-            error: `第1小隊（${platoon1.length}名）と第2小隊（${platoon2.length}名）の人数が一致していません。同じ人数に調整してください。`
+            error: `正規職員の第1小隊（${platoon1.length}名）と第2小隊（${platoon2.length}名）の人数が一致していません。同じ人数に調整してください。`
         };
     }
 
@@ -230,15 +279,15 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11) {
     // 各小隊の候補シーケンスを希望休でフィルタリング
     function getCandidatesForPlatoon(platoon) {
         const isDutyType = (shift) => ['当', '明', '張'].includes(shift);
-        const isHolidayType = (shift) => !isDutyType(shift);
+        const isHolidayType = (shift) => shift && shift !== '-' && !isDutyType(shift);
 
         return platoon.map(staff => {
             const staffHopes = hopeShifts[staff.id] || {};
             
             // 1. 通常の有効パターンから適合するものを探す
             let filtered = VALID_SEQUENCES.filter(seq => {
-                // 前サイクル末尾からの連続勤務数を考慮
-                const prevConsec = staff.prevConsecutive || 0;
+                // 前サイクル末尾からの連続勤務数を考慮 (最大3日に制限)
+                const prevConsec = Math.min(3, staff.prevConsecutive || 0);
                 if (prevConsec > 0) {
                     let headConsec = 0;
                     for (let k = 0; k < 14; k++) {
@@ -306,6 +355,10 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11) {
         }
     }
 
+    // 応援職員の小隊別リスト
+    const support1 = supportStaff.filter(s => s.platoon === 1);
+    const support2 = supportStaff.filter(s => s.platoon === 2);
+
     // 段階的制約緩和によるソルバー実行
     const maxH_for_M = N - minStaffing; 
     const avgH = (N * 4) / 14;
@@ -325,8 +378,8 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11) {
 
     for (let p = 0; p < profiles.length; p++) {
         const { minH, maxH } = profiles[p];
-        sol1 = solvePlatoon(candidates1, minH, maxH, platoon1);
-        sol2 = solvePlatoon(candidates2, minH, maxH, platoon2);
+        sol1 = solvePlatoon(candidates1, minH, maxH, platoon1, support1, startDate, minSubOfficer, minLarge, minParamedic);
+        sol2 = solvePlatoon(candidates2, minH, maxH, platoon2, support2, startDate, minSubOfficer, minLarge, minParamedic);
         
         if (sol1 && sol2) {
             usedProfileIndex = p;
@@ -376,6 +429,46 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11) {
         roster[staff.id] = schedule;
     });
 
+    // 応援職員のスケジュール組み立て (第1小隊)
+    support1.forEach(s => {
+        const schedule = new Array(28);
+        for (let d = 0; d < 28; d++) {
+            const dayDate = new Date(startDate);
+            dayDate.setDate(startDate.getDate() + d);
+            const y = dayDate.getFullYear();
+            const m = String(dayDate.getMonth() + 1).padStart(2, '0');
+            const dayVal = String(dayDate.getDate()).padStart(2, '0');
+            const dayStr = `${y}-${m}-${dayVal}`;
+            
+            if (dayStr >= s.supportStart && dayStr <= s.supportEnd) {
+                schedule[d] = (d % 2 === 0) ? '当' : '明';
+            } else {
+                schedule[d] = '休';
+            }
+        }
+        roster[s.id] = schedule;
+    });
+
+    // 応援職員のスケジュール組み立て (第2小隊)
+    support2.forEach(s => {
+        const schedule = new Array(28);
+        for (let d = 0; d < 28; d++) {
+            const dayDate = new Date(startDate);
+            dayDate.setDate(startDate.getDate() + d);
+            const y = dayDate.getFullYear();
+            const m = String(dayDate.getMonth() + 1).padStart(2, '0');
+            const dayVal = String(dayDate.getDate()).padStart(2, '0');
+            const dayStr = `${y}-${m}-${dayVal}`;
+            
+            if (dayStr >= s.supportStart && dayStr <= s.supportEnd) {
+                schedule[d] = (d % 2 === 1) ? '当' : '明';
+            } else {
+                schedule[d] = '休';
+            }
+        }
+        roster[s.id] = schedule;
+    });
+
     return {
         success: true,
         roster: roster,
@@ -393,19 +486,23 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11) {
  * @param {number} minStaffing 最低確保人員
  * @returns {Array} 警告オブジェクトの配列
  */
-function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null) {
+function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, minSubOfficer = 1, minLarge = 1, minParamedic = 1) {
     const warnings = [];
     const staffMap = {};
     staffList.forEach(s => { staffMap[s.id] = s; });
 
     // 各資格の総登録数（小隊別）をカウントし、警告時の目標値を動的に調整
-    const getPlatoonTarget = (platoonNum, prop) => {
+    const getPlatoonTarget = (platoonNum, prop, userMin = 2) => {
         const total = staffList.filter(s => s.platoon === platoonNum && s[prop]).length;
-        return Math.min(2, total);
+        return Math.min(userMin, total);
     };
     const getPlatoonOfficerTarget = (platoonNum) => {
         const total = staffList.filter(s => s.platoon === platoonNum && ["消防司令", "消防司令補", "消防士長"].includes(s.rank)).length;
         return Math.min(2, total);
+    };
+    const getPlatoonSubOfficerTarget = (platoonNum, userMin = 1) => {
+        const total = staffList.filter(s => s.platoon === platoonNum && ["消防司令", "消防司令補"].includes(s.rank)).length;
+        return Math.min(userMin, total);
     };
 
     // 1. 各スタッフ個人の制約チェック
@@ -413,6 +510,7 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null) 
         const schedule = roster[staffId];
         const staff = staffMap[staffId];
         if (!staff) continue;
+        if (staff.isSupport) continue; // 応援職員は個人制約チェックをスキップ
 
         let dutyCount = 0;
         let holidayCount = 0;
@@ -524,6 +622,7 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null) 
         const activeStaffList = staffList.filter(s => s.platoon === activePlatoonNum);
         
         let officersOnDuty = 0;
+        let subOfficersOnDuty = 0;
         let largeOnDuty = 0;
         let paramedicsOnDuty = 0;
         let rescueOnDuty = 0;
@@ -534,6 +633,7 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null) 
                 const s = staffMap[staffId];
                 if (s && s.platoon === activePlatoonNum) {
                     if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) officersOnDuty++;
+                    if (["消防司令", "消防司令補"].includes(s.rank)) subOfficersOnDuty++;
                     if (s.hasLargeLicense) largeOnDuty++;
                     if (s.isParamedic) paramedicsOnDuty++;
                     if (s.isRescue) rescueOnDuty++;
@@ -551,11 +651,19 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null) 
         }
         
         // 資格・階級別バランスの目標値（小隊内の総員から動的に決定）
+        const targetSubOfficers = getPlatoonSubOfficerTarget(activePlatoonNum, minSubOfficer);
         const targetOfficers = getPlatoonOfficerTarget(activePlatoonNum);
-        const targetLarge = getPlatoonTarget(activePlatoonNum, 'hasLargeLicense');
-        const targetParamedics = getPlatoonTarget(activePlatoonNum, 'isParamedic');
-        const targetRescue = getPlatoonTarget(activePlatoonNum, 'isRescue');
+        const targetLarge = getPlatoonTarget(activePlatoonNum, 'hasLargeLicense', minLarge);
+        const targetParamedics = getPlatoonTarget(activePlatoonNum, 'isParamedic', minParamedic);
+        const targetRescue = getPlatoonTarget(activePlatoonNum, 'isRescue', 2);
         
+        if (subOfficersOnDuty < targetSubOfficers) {
+            warnings.push({
+                type: 'balance_subofficer',
+                dayIndex: d,
+                message: `${d + 1}日目：当番（第${activePlatoonNum}小隊）の司令・司令補が ${subOfficersOnDuty} 名です。${targetSubOfficers}名必要です。`
+            });
+        }
         if (officersOnDuty < targetOfficers) {
             warnings.push({
                 type: 'balance_officer',
@@ -595,7 +703,7 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null) 
  * @param {Date} startDate 起算日
  * @param {Array} staffList スタッフリスト
  */
-function exportToCSV(roster, startDate, staffList) {
+function exportToCSV(roster, startDate, staffList, hourlyLeaves = {}, activeCycle = 1) {
     const headers = ['氏名', '小隊', '階級', '大型免許', '救命士', '救助'];
     const wdays = ['日', '月', '火', '水', '木', '金', '土'];
     
@@ -606,7 +714,7 @@ function exportToCSV(roster, startDate, staffList) {
         const dateStr = `${date.getMonth() + 1}/${date.getDate()}(${wdays[date.getDay()]})`;
         headers.push(dateStr);
     }
-    headers.push('当番日数', '週休日数');
+    headers.push('当番日数', '週休日数', '年休日数');
 
     const rows = [headers];
 
@@ -624,14 +732,23 @@ function exportToCSV(roster, startDate, staffList) {
         
         let dutyCount = 0;
         let holidayCount = 0;
+        let annualLeaveCount = 0;
         
         for (let d = 0; d < 28; d++) {
             const shift = schedule[d];
             row.push(shift);
             if (shift === '当') dutyCount++;
             if (shift === '休') holidayCount++;
+            if (shift === '有') {
+                const hourlyKey = `${activeCycle}_${staff.id}_${d}`;
+                if (hourlyLeaves[hourlyKey]) {
+                    annualLeaveCount += hourlyLeaves[hourlyKey].hours / 8.0;
+                } else {
+                    annualLeaveCount += staff.isDayWorker ? 1.0 : 2.0;
+                }
+            }
         }
-        row.push(dutyCount, holidayCount);
+        row.push(dutyCount, holidayCount, Number.isInteger(annualLeaveCount) ? annualLeaveCount.toString() : annualLeaveCount.toFixed(2));
         rows.push(row);
     });
 
@@ -644,7 +761,7 @@ function exportToCSV(roster, startDate, staffList) {
         });
         totalRow.push(count);
     }
-    totalRow.push('-', '-');
+    totalRow.push('-', '-', '-');
     rows.push(totalRow);
 
     // CSV文字列の生成 (BOM付き UTF-8 でExcel文字化けを防ぐ)
@@ -658,7 +775,7 @@ function exportToCSV(roster, startDate, staffList) {
  * @param {Array} staffList スタッフ情報リスト
  * @param {number} minStaffing 最低確保人員
  */
-function insertAnnualLeaves(roster, staffList, minStaffing = 11) {
+function insertAnnualLeaves(roster, staffList, minStaffing = 11, minSubOfficer = 1, minLarge = 1, minParamedic = 1) {
     const staffMap = {};
     staffList.forEach(s => { staffMap[s.id] = s; });
 
@@ -670,6 +787,7 @@ function insertAnnualLeaves(roster, staffList, minStaffing = 11) {
         // その日の出勤者（「当」）をリストアップ
         let dutyStaffIds = [];
         let officersOnDuty = 0;
+        let subOfficersOnDuty = 0;
         let largeOnDuty = 0;
         let paramedicsOnDuty = 0;
         let rescueOnDuty = 0;
@@ -680,6 +798,7 @@ function insertAnnualLeaves(roster, staffList, minStaffing = 11) {
                 if (s && s.platoon === activePlatoonNum) {
                     dutyStaffIds.push(staffId);
                     if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) officersOnDuty++;
+                    if (s.rank === "消防司令補") subOfficersOnDuty++;
                     if (s.hasLargeLicense) largeOnDuty++;
                     if (s.isParamedic) paramedicsOnDuty++;
                     if (s.isRescue) rescueOnDuty++;

@@ -740,11 +740,51 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .calendar-staff-item-name {
-    font-weight: 500;
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 90px;
+    flex: 1;
+    min-width: 0;
+}
+
+.calendar-staff-left {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    flex: 1;
+}
+
+.calendar-staff-rank {
+    font-size: 8.5px;
+    opacity: 0.7;
+    margin-left: 2px;
+    white-space: nowrap;
+}
+
+.calendar-staff-quals {
+    display: flex;
+    gap: 2.5px;
+    align-items: center;
+    flex-shrink: 0;
+    margin-left: 4px;
+}
+
+.calendar-group-header {
+    font-size: 8px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    background-color: var(--secondary-bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-top: 6px;
+    margin-bottom: 2px;
+    text-align: left;
+    border-left: 3px solid var(--primary-color);
+}
+
+.calendar-staff-list .calendar-group-header:first-of-type {
+    margin-top: 0;
 }
 
 .calendar-staff-badge {
@@ -841,7 +881,7 @@ h1, h2, h3, h4, h5, h6 {
 /* Staff Input Row layout in Sidebar */
 .staff-input-row {
     display: grid;
-    grid-template-columns: 1.15fr 85px 95px;
+    grid-template-columns: 1fr 85px 125px;
     gap: 6px;
     align-items: center;
     background-color: var(--secondary-bg);
@@ -891,21 +931,33 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .qual-btn.active-large {
-    background-color: #2563eb;
-    color: #ffffff;
-    border-color: #2563eb;
-}
-
-.qual-btn.active-paramedic {
-    background-color: #dc2626;
+    background-color: #dc2626; /* 赤 */
     color: #ffffff;
     border-color: #dc2626;
 }
 
-.qual-btn.active-rescue {
-    background-color: #d97706;
+.qual-btn.active-paramedic {
+    background-color: #2563eb; /* 青 */
     color: #ffffff;
-    border-color: #d97706;
+    border-color: #2563eb;
+}
+
+.qual-btn.active-rescue {
+    background-color: #ea580c; /* オレンジ */
+    color: #ffffff;
+    border-color: #ea580c;
+}
+
+.qual-btn.active-dayworker {
+    background-color: #0f766e; /* 緑 */
+    color: #ffffff;
+    border-color: #0f766e;
+}
+
+.qual-btn.active-kikan {
+    background-color: #111827; /* 黒 */
+    color: #ffffff;
+    border-color: #111827;
 }
 
 /* Badges for Rank & Qualifications in Tables */
@@ -927,25 +979,36 @@ h1, h2, h3, h4, h5, h6 {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 9px;
-    font-weight: 700;
-    width: 13px;
-    height: 13px;
+    font-size: 9.5px;
+    font-weight: 800;
+    width: 15px;
+    height: 15px;
     border-radius: 3px;
     color: #ffffff;
     user-select: none;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+    text-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.15);
+    flex-shrink: 0;
 }
 
 .qual-badge-large {
-    background-color: #2563eb;
+    background-color: #dc2626; /* 赤 */
 }
 
 .qual-badge-paramedic {
-    background-color: #dc2626;
+    background-color: #2563eb; /* 青 */
 }
 
 .qual-badge-rescue {
-    background-color: #d97706;
+    background-color: #ea580c; /* オレンジ */
+}
+
+.qual-badge-dayworker {
+    background-color: #0f766e; /* 日勤 (緑) */
+}
+
+.qual-badge-kikan {
+    background-color: #111827; /* 機関員 (黒) */
 }
 
 /* Sub-total rows */
@@ -1232,3 +1295,240 @@ h1, h2, h3, h4, h5, h6 {
 .btn-delete-shift:hover {
     color: #b91c1c;
 }
+
+.btn-modal.active {
+    background-color: var(--primary-light) !important;
+    border-color: var(--primary-color) !important;
+    font-weight: bold;
+}
+
+/* Custom Dialog Overlay */
+.custom-dialog-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(15, 23, 42, 0.4); /* Slate 900 with opacity */
+    backdrop-filter: blur(4px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000; /* Extremely high z-index to stay on top of everything */
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.custom-dialog-overlay.active {
+    opacity: 1;
+}
+
+/* Custom Dialog Box */
+.custom-dialog-box {
+    background: var(--bg-card);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-lg);
+    border-radius: var(--radius-md);
+    padding: 24px;
+    width: 90%;
+    max-width: 420px;
+    transform: scale(0.95);
+    transition: transform 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    color: var(--text-primary);
+}
+
+.custom-dialog-overlay.active .custom-dialog-box {
+    transform: scale(1);
+}
+
+/* Custom Dialog Text */
+.custom-dialog-text {
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Custom Dialog Input (for Prompt) */
+.custom-dialog-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.custom-dialog-input:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+/* Custom Dialog Buttons */
+.custom-dialog-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.custom-dialog-btn {
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    border: none;
+    transition: background-color var(--transition-fast);
+}
+
+.custom-dialog-btn-primary {
+    background-color: var(--primary-color);
+    color: #ffffff;
+}
+
+.custom-dialog-btn-primary:hover {
+    background-color: var(--primary-hover);
+}
+
+.custom-dialog-btn-secondary {
+    background-color: var(--secondary-bg);
+    color: var(--secondary-text);
+    border: 1px solid var(--border-color);
+}
+
+.custom-dialog-btn-secondary:hover {
+    background-color: var(--secondary-hover);
+}
+
+/* 補充勤務（応援職員）レイアウト */
+.support-layout {
+    display: grid;
+    grid-template-columns: 1fr 2.2fr;
+    gap: 24px;
+    align-items: start;
+}
+
+@media (max-width: 1024px) {
+    .support-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+.card-sub {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(10px);
+}
+
+.card-sub h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-top: 0;
+    margin-bottom: 16px;
+    color: var(--text-primary);
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 8px;
+}
+
+.support-list-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(10px);
+}
+
+.support-list-container h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-top: 0;
+    margin-bottom: 16px;
+    color: var(--text-primary);
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 8px;
+}
+
+.form-group-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.checkbox-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    background-color: var(--secondary-bg);
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.checkbox-group label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text-primary);
+    margin-bottom: 0 !important;
+}
+
+.support-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.support-table th,
+.support-table td {
+    padding: 12px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.support-table th {
+    background-color: var(--secondary-bg);
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.support-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.support-table tbody tr:hover {
+    background-color: rgba(79, 70, 229, 0.04);
+}
+
+.badge-support {
+    display: inline-block;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 4px;
+    background-color: var(--primary-light);
+    color: var(--primary-color);
+    margin-left: 6px;
+    border: 1px solid rgba(79, 70, 229, 0.2);
+    vertical-align: middle;
+}
+
+
+
