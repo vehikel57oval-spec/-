@@ -11,7 +11,50 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <header class="app-header no-print">
+    <!-- ログインポータル画面 -->
+    <div id="login-screen" class="login-screen-wrapper">
+        <div class="login-card">
+            <div class="login-logo">
+                <svg class="login-logo-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 42px; height: 42px; color: #dc2626;">
+                    <path d="M19 4H5C3.89543 4 3 4.89543 3 6V20C3 21.1046 3.89543 22 5 22H19C20.1046 22 21 21.1046 21 20V6C21 4.89543 20.1046 4 19 4Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+                    <path d="M16 2V6M8 2V6M3 10H21" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M8 14H12V18H8V14Z" fill="currentColor"/>
+                </svg>
+                <h2>隔日勤務 勤務表自動生成</h2>
+            </div>
+            <p class="login-subtitle">出勤管理・車両配置シミュレータ</p>
+            
+            <div class="login-roles-container">
+                <!-- 一般職員（閲覧専用） -->
+                <button id="btn-login-viewer" class="btn btn-login-option">
+                    <span class="option-icon">👁️</span>
+                    <span class="option-text">一般職員用 (閲覧専用)</span>
+                </button>
+                
+                <div class="login-divider"><span>または</span></div>
+                
+                <!-- 管理者ログインフォーム -->
+                <form id="login-admin-form" onsubmit="return false;">
+                    <div class="form-group" style="text-align: left;">
+                        <label for="login-username" style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: block;">管理者ID</label>
+                        <input type="text" id="login-username" class="form-control" placeholder="admin" required autocomplete="username" style="height: 34px; font-size: 13px;">
+                    </div>
+                    <div class="form-group" style="text-align: left; margin-bottom: 16px;">
+                        <label for="login-password" style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: block;">パスワード</label>
+                        <input type="password" id="login-password" class="form-control" placeholder="••••••••" required autocomplete="current-password" style="height: 34px; font-size: 13px;">
+                    </div>
+                    <button type="submit" id="btn-login-submit" class="btn btn-primary btn-block" style="height: 38px; font-size: 13px; font-weight: 600;">
+                        <span class="btn-text">管理者としてログイン (編集)</span>
+                    </button>
+                </form>
+                <div id="login-error-msg" class="login-error-msg" style="display: none; color: #dc2626; font-size: 12px; margin-top: 10px; font-weight: 500; text-align: center;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- メインアプリケーションレイアウト -->
+    <div id="main-app-layout" style="display: none;">
+        <header class="app-header no-print">
         <div class="header-logo">
             <svg class="header-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M19 4H5C3.89543 4 3 4.89543 3 6V20C3 21.1046 3.89543 22 5 22H19C20.1046 22 21 21.1046 21 20V6C21 4.89543 20.1046 4 19 4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
@@ -25,9 +68,12 @@
                 <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
                 <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             </button>
-            <button id="btn-save" class="btn btn-secondary">設定保存</button>
-            <button id="btn-load" class="btn btn-secondary">設定読込</button>
+            <button id="btn-save" class="btn btn-secondary admin-only">設定保存</button>
+            <button id="btn-load" class="btn btn-secondary admin-only">設定読込</button>
             <input type="file" id="file-loader" style="display: none;" accept=".json">
+            <button id="btn-logout" class="btn btn-secondary" style="border-color: rgba(220, 38, 38, 0.3); color: #dc2626; background-color: rgba(220, 38, 38, 0.02); display: flex; align-items: center; gap: 4px;">
+                <span>🚪 ログアウト</span>
+            </button>
         </div>
     </header>
 
@@ -38,13 +84,11 @@
                 <h2>1. 基本設定</h2>
                 <div class="form-group">
                     <label for="input-station">署所名</label>
-                    <input type="text" id="input-station" class="form-control" list="station-list" value="本署" placeholder="例：本署、東分署">
+                    <input type="text" id="input-station" class="form-control" list="station-list" value="指宿消防署" placeholder="例：指宿消防署、山川開聞分遣所">
                     <datalist id="station-list">
-                        <option value="本署">
-                        <option value="東分署">
-                        <option value="南分署">
-                        <option value="北分署">
-                        <option value="西出張所">
+                        <option value="指宿消防署">
+                        <option value="山川開聞分遣所">
+                        <option value="頴娃分遣所">
                     </datalist>
                 </div>
                 <div class="form-group">
@@ -95,13 +139,18 @@
                         <option value="0">1日目 (最初から)</option>
                     </select>
                 </div>
+                <div class="form-group no-print" style="margin-bottom: 12px; margin-top: 12px;">
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; font-size: 12px; color: var(--text-secondary);">
+                        <input type="checkbox" id="chk-auto-leave" checked style="width: 14px; height: 14px; cursor: pointer;"> 余剰日に休暇を自動割当（年休）
+                    </label>
+                </div>
                 <div class="cycle-period-info">
                     <span class="info-label">対象期間 (28日間):</span>
                     <span id="label-cycle-range" class="info-value">-</span>
                 </div>
             </section>
 
-            <section class="card settings-card no-print">
+            <section class="card settings-card no-print admin-only">
                 <h2>1.5. 勤務シフトの設定</h2>
                 <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">各シフトの表示文字や背景・文字色を編集できます。※「当/非/休」は変更できません。</p>
                 <div id="shift-config-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; padding-right: 4px;">
@@ -110,7 +159,7 @@
                 <button id="btn-add-shift" class="btn btn-secondary btn-block" style="margin-top: 8px; font-size: 11px; padding: 6px 12px; height: auto;">＋ 新規シフトを追加</button>
             </section>
 
-            <section class="card settings-card">
+            <section class="card settings-card admin-only">
                 <h2>2. 小隊メンバー登録</h2>
                 <div class="platoon-tabs">
                     <button class="platoon-tab-btn active" data-platoon="1">第1小隊</button>
@@ -126,7 +175,7 @@
             </section>
 
             <div class="action-buttons">
-                <button id="btn-generate" class="btn btn-primary btn-block">
+                <button id="btn-generate" class="btn btn-primary btn-block admin-only">
                     <span class="btn-text">勤務表を自動生成</span>
                     <span class="spinner" style="display: none;"></span>
                 </button>
@@ -150,8 +199,8 @@
             <div class="view-tabs no-print">
                 <button class="view-tab-btn active" data-tab="tab-list">勤務一覧（編集・統計）</button>
                 <button class="view-tab-btn" data-tab="tab-calendar">カレンダー表示</button>
-                <button class="view-tab-btn" data-tab="tab-hope">事前指定（希望シフト）</button>
-                <button class="view-tab-btn" data-tab="tab-support">補充勤務</button>
+                <button class="view-tab-btn admin-only" data-tab="tab-hope">事前指定（希望シフト）</button>
+                <button class="view-tab-btn admin-only" data-tab="tab-support">補充勤務</button>
                 <button class="view-tab-btn" data-tab="tab-vehicle">車両配置</button>
             </div>
 
@@ -299,7 +348,7 @@
             <section id="tab-vehicle" class="tab-content card">
                 <div class="tab-header no-print">
                     <h2>車両配置（乗車割り当て）</h2>
-                    <p class="tab-description">日ごとの出勤メンバーを各車両（指揮車、ポンプ車、救急車、救助工作車）に割り当てます。履歴データを元にAI提案を実行できます。</p>
+                    <p class="tab-description">日ごとの出勤メンバーを各車両（指揮車、タンク車、救急車1、救急車2、救助工作車、はしご車、拠点機能車、予備車、卓上通信）に割り当てます。履歴データを元にAI提案を実行できます。</p>
                 </div>
 
                 <div class="vehicle-controls no-print" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; background: var(--secondary-bg); padding: 12px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
@@ -310,24 +359,39 @@
                         <span id="vehicle-platoon-label" class="badge-support" style="font-size: 12px; padding: 4px 8px; margin-left: 8px;">-</span>
                     </div>
                     <div class="vehicle-actions" style="display: flex; align-items: center; gap: 8px;">
-                        <button id="btn-vehicle-ai-propose" class="btn btn-primary" style="padding: 6px 14px; font-size: 13px;">🤖 AI提案</button>
-                        <button id="btn-vehicle-copy-prev" class="btn btn-secondary" style="padding: 6px 14px; font-size: 13px;">📋 前日コピー</button>
-                        <button id="btn-vehicle-clear" class="btn btn-secondary" style="padding: 6px 14px; font-size: 13px; color: var(--color-wday-sun); border-color: rgba(220, 38, 38, 0.2); background-color: rgba(220, 38, 38, 0.02);">× 配置初期化</button>
+                        <button id="btn-vehicle-ai-propose" class="btn btn-primary admin-only" style="padding: 6px 14px; font-size: 13px;">🤖 AI提案</button>
+                        <button id="btn-vehicle-copy-prev" class="btn btn-secondary admin-only" style="padding: 6px 14px; font-size: 13px;">📋 前日コピー</button>
+                        <button id="btn-vehicle-clear" class="btn btn-secondary admin-only" style="padding: 6px 14px; font-size: 13px; color: var(--color-wday-sun); border-color: rgba(220, 38, 38, 0.2); background-color: rgba(220, 38, 38, 0.02);">× 配置初期化</button>
                 </div>
 
-                <div class="vehicle-selector-bar no-print" id="vehicle-selector-bar" style="margin-bottom: 20px; display: flex; align-items: center; flex-wrap: wrap; gap: 15px; background: var(--bg-card); padding: 10px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 13px;">
+                <div class="vehicle-selector-bar no-print admin-only" id="vehicle-selector-bar" style="margin-bottom: 20px; display: flex; align-items: center; flex-wrap: wrap; gap: 15px; background: var(--bg-card); padding: 10px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 13px;">
                     <span style="font-weight: 600; color: var(--text-secondary);">運用車両の指定:</span>
                     <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;">
                         <input type="checkbox" id="chk-vehicle-shiki" checked> 指揮車
                     </label>
                     <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;">
-                        <input type="checkbox" id="chk-vehicle-pump" checked> ポンプ車
+                        <input type="checkbox" id="chk-vehicle-tank" checked> タンク車
                     </label>
                     <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;">
-                        <input type="checkbox" id="chk-vehicle-kyukyu" checked> 救急車
+                        <input type="checkbox" id="chk-vehicle-kyukyu1" checked> 救急車1
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;">
+                        <input type="checkbox" id="chk-vehicle-kyukyu2" checked> 救急車2
                     </label>
                     <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;">
                         <input type="checkbox" id="chk-vehicle-kyujo" checked> 救助工作車
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;">
+                        <input type="checkbox" id="chk-vehicle-hashigo" checked> はしご車
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;">
+                        <input type="checkbox" id="chk-vehicle-kyoten" checked> 拠点機能車
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;">
+                        <input type="checkbox" id="chk-vehicle-yobi" checked> 予備車
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;">
+                        <input type="checkbox" id="chk-vehicle-tsushin" checked> 卓上通信
                     </label>
                 </div>
 
@@ -368,62 +432,90 @@
                                 </div>
                             </div>
 
-                            <!-- ポンプ車 -->
-                            <div class="vehicle-card" data-vehicle="ポンプ車" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                            <!-- タンク車 -->
+                            <div class="vehicle-card" data-vehicle="タンク車" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
                                 <div class="vehicle-card-header" style="background: #0284c7; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
-                                    <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">ポンプ車</h4>
-                                    <span class="vehicle-status-badge" data-vehicle="ポンプ車" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                    <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">タンク車</h4>
+                                    <span class="vehicle-status-badge" data-vehicle="タンク車" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
                                 </div>
                                 <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
                                     <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                                         <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
-                                        <select class="form-control vehicle-slot-select" data-vehicle="ポンプ車" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                        <select class="form-control vehicle-slot-select" data-vehicle="タンク車" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
                                             <option value="">-- 未指定 --</option>
                                         </select>
                                     </div>
                                     <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                                         <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
-                                        <select class="form-control vehicle-slot-select" data-vehicle="ポンプ車" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                        <select class="form-control vehicle-slot-select" data-vehicle="タンク車" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
                                             <option value="">-- 未指定 --</option>
                                         </select>
                                     </div>
                                     <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                                         <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員1</label>
-                                        <select class="form-control vehicle-slot-select" data-vehicle="ポンプ車" data-role="隊員1" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                        <select class="form-control vehicle-slot-select" data-vehicle="タンク車" data-role="隊員1" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
                                             <option value="">-- 未指定 --</option>
                                         </select>
                                     </div>
                                     <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                                         <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員2</label>
-                                        <select class="form-control vehicle-slot-select" data-vehicle="ポンプ車" data-role="隊員2" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                        <select class="form-control vehicle-slot-select" data-vehicle="タンク車" data-role="隊員2" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
                                             <option value="">-- 未指定 --</option>
                                         </select>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- 救急車 -->
-                            <div class="vehicle-card" data-vehicle="救急車" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                            <!-- 救急車1 -->
+                            <div class="vehicle-card" data-vehicle="救急車1" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
                                 <div class="vehicle-card-header" style="background: #db2777; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
-                                    <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">救急車</h4>
-                                    <span class="vehicle-status-badge" data-vehicle="救急車" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                    <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">救急車1</h4>
+                                    <span class="vehicle-status-badge" data-vehicle="救急車1" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
                                 </div>
                                 <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
                                     <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                                         <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
-                                        <select class="form-control vehicle-slot-select" data-vehicle="救急車" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                        <select class="form-control vehicle-slot-select" data-vehicle="救急車1" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
                                             <option value="">-- 未指定 --</option>
                                         </select>
                                     </div>
                                     <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                                         <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #2563eb;">救命士 (救)</label>
-                                        <select class="form-control vehicle-slot-select" data-vehicle="救急車" data-role="救命士" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                        <select class="form-control vehicle-slot-select" data-vehicle="救急車1" data-role="救命士" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
                                             <option value="">-- 未指定 --</option>
                                         </select>
                                     </div>
                                     <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                                         <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
-                                        <select class="form-control vehicle-slot-select" data-vehicle="救急車" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                        <select class="form-control vehicle-slot-select" data-vehicle="救急車1" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 救急車2 -->
+                            <div class="vehicle-card" data-vehicle="救急車2" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                <div class="vehicle-card-header" style="background: #be185d; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                    <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">救急車2</h4>
+                                    <span class="vehicle-status-badge" data-vehicle="救急車2" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                </div>
+                                <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="救急車2" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #2563eb;">救命士 (救)</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="救急車2" data-role="救命士" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="救急車2" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
                                             <option value="">-- 未指定 --</option>
                                         </select>
                                     </div>
@@ -464,6 +556,118 @@
                                 </div>
                             </div>
 
+                            <!-- はしご車 -->
+                            <div class="vehicle-card" data-vehicle="はしご車" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                <div class="vehicle-card-header" style="background: #dc2626; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                    <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">はしご車</h4>
+                                    <span class="vehicle-status-badge" data-vehicle="はしご車" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                </div>
+                                <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="はしご車" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="はしご車" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="はしご車" data-role="隊員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 拠点機能車 -->
+                            <div class="vehicle-card" data-vehicle="拠点機能車" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                <div class="vehicle-card-header" style="background: #0d9488; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                    <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">拠点機能車</h4>
+                                    <span class="vehicle-status-badge" data-vehicle="拠点機能車" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                </div>
+                                <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="拠点機能車" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="拠点機能車" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="拠点機能車" data-role="隊員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 予備車 -->
+                            <div class="vehicle-card" data-vehicle="予備車" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                <div class="vehicle-card-header" style="background: #4b5563; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                    <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">予備車</h4>
+                                    <span class="vehicle-status-badge" data-vehicle="予備車" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                </div>
+                                <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="予備車" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="予備車" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="予備車" data-role="隊員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 卓上通信 -->
+                            <div class="vehicle-card" data-vehicle="卓上通信" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                <div class="vehicle-card-header" style="background: #7c3aed; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                    <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">卓上通信</h4>
+                                    <span class="vehicle-status-badge" data-vehicle="卓上通信" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                </div>
+                                <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="卓上通信" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="卓上通信" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                    <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                        <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員</label>
+                                        <select class="form-control vehicle-slot-select" data-vehicle="卓上通信" data-role="隊員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <option value="">-- 未指定 --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
                         </div>
                     </div>
                 </div>
@@ -474,6 +678,7 @@
     <footer class="app-footer no-print">
         <p>&copy; 2026 隔日勤務シフト自動生成システム</p>
     </footer>
+    </div> <!-- #main-app-layout -->
 
     <!-- シフト変更用ポップアップ（手動編集・事前指定用） -->
     <div id="shift-modal" class="modal no-print" style="display: none;">

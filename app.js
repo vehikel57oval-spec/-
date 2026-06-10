@@ -4,9 +4,10 @@
 
 // アプリケーション状態
 const state = {
+    userRole: null, // 'admin' or 'viewer' or null
     startDate: null,
     activeCycle: 1,
-    station: "本署",
+    station: "指宿消防署",
     shifts: [],
     staffList: [],
     hopeShifts: {}, // cycle_staffId -> dayIndex -> '休' or '当' or null
@@ -23,6 +24,59 @@ const state = {
     vehicleAssignments: {}, // dateStr -> vehicleObj
     deployedVehicles: [] // array of vehicleNames that are active
 };
+
+// ログイン・ログアウト処理
+function loginAs(role) {
+    state.userRole = role;
+    
+    const loginScreen = document.getElementById('login-screen');
+    const mainApp = document.getElementById('main-app-layout');
+    
+    if (loginScreen) loginScreen.style.display = 'none';
+    if (mainApp) mainApp.style.display = 'block';
+    
+    if (role === 'viewer') {
+        document.body.classList.add('role-viewer');
+        // 閲覧モードの場合、事前指定や補充管理タブが開かれていたら勤務一覧に強制遷移
+        if (state.activeTab === 'tab-hope' || state.activeTab === 'tab-support') {
+            state.activeTab = 'tab-list';
+            document.querySelectorAll('.view-tab-btn').forEach(btn => {
+                if (btn.dataset.tab === 'tab-list') {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+        }
+    } else {
+        document.body.classList.remove('role-viewer');
+    }
+    
+    refreshUI();
+}
+
+function logout() {
+    state.userRole = null;
+    
+    const usernameInput = document.getElementById('login-username');
+    const passwordInput = document.getElementById('login-password');
+    const errorMsg = document.getElementById('login-error-msg');
+    
+    if (usernameInput) usernameInput.value = '';
+    if (passwordInput) passwordInput.value = '';
+    if (errorMsg) {
+        errorMsg.style.display = 'none';
+        errorMsg.textContent = '';
+    }
+    
+    const loginScreen = document.getElementById('login-screen');
+    const mainApp = document.getElementById('main-app-layout');
+    
+    if (loginScreen) loginScreen.style.display = 'flex';
+    if (mainApp) mainApp.style.display = 'none';
+    
+    document.body.classList.remove('role-viewer');
+}
 
 // カスタムダイアログ（システム風デザイン・画面中央）
 function showCustomAlert(message) {
@@ -412,7 +466,7 @@ function updateThemeIcon(theme) {
 // 設定の初期化
 function initSettings() {
     state.startDate = new Date();
-    state.station = "本署";
+    state.station = "指宿消防署";
     state.shifts = [
         { key: "当", name: "勤務", char: "当", color: "#e0f2fe", textColor: "#0369a1", isSystem: true },
         { key: "明", name: "非番", char: "非", color: "#f3f4f6", textColor: "#4b5563", isSystem: true },
@@ -428,32 +482,89 @@ function initSettings() {
 // デフォルトスタッフのロード
 function loadDefaultStaff() {
     state.staffList = [];
-    for (let i = 0; i < state.platoonSize; i++) {
-        const def1 = DEFAULT_STAFF_PLATOON_1[i] || { name: `第1小隊 隊員${i+1}`, rank: "消防士", large: false, paramedic: false, rescue: false };
-        state.staffList.push({
-            id: `p1-${i+1}`,
-            name: def1.name,
-            platoon: 1,
-            rank: def1.rank,
-            hasLargeLicense: def1.large,
-            isParamedic: def1.paramedic,
-            isRescue: def1.rescue,
-            isKikan: def1.large || false,
-            isDayWorker: false
-        });
+    const stationName = state.station || "";
+    
+    if (stationName === "指宿消防署" || stationName === "山川開聞分遣所" || stationName === "頴娃分遣所") {
+        let lastName = "指宿";
+        if (stationName === "山川開聞分遣所") lastName = "山川";
+        else if (stationName === "頴娃分遣所") lastName = "頴娃";
         
-        const def2 = DEFAULT_STAFF_PLATOON_2[i] || { name: `第2小隊 隊員${i+1}`, rank: "消防士", large: false, paramedic: false, rescue: false };
-        state.staffList.push({
-            id: `p2-${i+1}`,
-            name: def2.name,
-            platoon: 2,
-            rank: def2.rank,
-            hasLargeLicense: def2.large,
-            isParamedic: def2.paramedic,
-            isRescue: def2.rescue,
-            isKikan: def2.large || false,
-            isDayWorker: false
-        });
+        const ranks = ["消防司令", "消防司令補", "消防士長", "消防副士長", "消防副士長", "消防士", "消防士", "消防士", "消防士", "消防士"];
+        
+        for (let i = 0; i < state.platoonSize; i++) {
+            // 第1小隊
+            let rank1 = ranks[i % ranks.length];
+            if (i === 0) rank1 = "消防司令";
+            else if (i === 1) rank1 = "消防司令補";
+            else if (i === 2) rank1 = "消防士長";
+            
+            const isParamedic1 = (i === 1 || i === 3 || i === 6);
+            const isRescue1 = (i === 2 || i === 4 || i === 7);
+            const hasLargeLicense1 = (i === 0 || i === 1 || i === 2 || i === 5 || i === 8);
+            
+            state.staffList.push({
+                id: `p1-${i+1}`,
+                name: `${lastName} A太${i+1}`,
+                platoon: 1,
+                rank: rank1,
+                hasLargeLicense: hasLargeLicense1,
+                isParamedic: isParamedic1,
+                isRescue: isRescue1,
+                isKikan: hasLargeLicense1,
+                isDayWorker: false
+            });
+            
+            // 第2小隊
+            let rank2 = ranks[i % ranks.length];
+            if (i === 0) rank2 = "消防司令";
+            else if (i === 1) rank2 = "消防司令補";
+            else if (i === 2) rank2 = "消防士長";
+            
+            const isParamedic2 = (i === 2 || i === 4 || i === 6);
+            const isRescue2 = (i === 1 || i === 3 || i === 7);
+            const hasLargeLicense2 = (i === 0 || i === 1 || i === 3 || i === 5 || i === 8);
+            
+            state.staffList.push({
+                id: `p2-${i+1}`,
+                name: `${lastName} B介${i+1}`,
+                platoon: 2,
+                rank: rank2,
+                hasLargeLicense: hasLargeLicense2,
+                isParamedic: isParamedic2,
+                isRescue: isRescue2,
+                isKikan: hasLargeLicense2,
+                isDayWorker: false
+            });
+        }
+    } else {
+        // 元のデフォルト名を使用
+        for (let i = 0; i < state.platoonSize; i++) {
+            const def1 = DEFAULT_STAFF_PLATOON_1[i] || { name: `第1小隊 隊員${i+1}`, rank: "消防士", large: false, paramedic: false, rescue: false };
+            state.staffList.push({
+                id: `p1-${i+1}`,
+                name: def1.name,
+                platoon: 1,
+                rank: def1.rank,
+                hasLargeLicense: def1.large,
+                isParamedic: def1.paramedic,
+                isRescue: def1.rescue,
+                isKikan: def1.large || false,
+                isDayWorker: false
+            });
+            
+            const def2 = DEFAULT_STAFF_PLATOON_2[i] || { name: `第2小隊 隊員${i+1}`, rank: "消防士", large: false, paramedic: false, rescue: false };
+            state.staffList.push({
+                id: `p2-${i+1}`,
+                name: def2.name,
+                platoon: 2,
+                rank: def2.rank,
+                hasLargeLicense: def2.large,
+                isParamedic: def2.paramedic,
+                isRescue: def2.rescue,
+                isKikan: def2.large || false,
+                isDayWorker: false
+            });
+        }
     }
     
     // 希望休オブジェクトの初期化 (全13サイクル)
@@ -484,6 +595,128 @@ function generateEmptyRoster() {
             }
             state.roster[key] = schedule;
         });
+    }
+}
+
+// 余剰人員日への年休（有）自動割当ロジック
+function adjustSurplusLeaves(cycleNum) {
+    const minStaff = state.minStaffing;
+    const minSub = state.minSubOfficer;
+    const minLarge = state.minLarge;
+    const minPara = state.minParamedic;
+    
+    // 各日（0〜27日）の余剰人員を調整するループ
+    for (let d = 0; d < 28; d++) {
+        // 出勤している職員のリストを作成
+        let onDutyStaff = [];
+        state.staffList.forEach(staff => {
+            const key = `${cycleNum}_${staff.id}`;
+            const shift = (state.roster[key] && state.roster[key][d]) || '-';
+            if (shift === '当') {
+                onDutyStaff.push(staff);
+            }
+        });
+        
+        // 余剰がなければ次の日へ
+        let surplus = onDutyStaff.length - minStaff;
+        if (surplus <= 0) continue;
+        
+        // 職員ごとのこのサイクルの現時点での総休日数をカウント（公平性の基準にする）
+        const holidayCounts = {};
+        state.staffList.forEach(staff => {
+            const key = `${cycleNum}_${staff.id}`;
+            const sched = state.roster[key] || [];
+            let count = 0;
+            sched.forEach(s => {
+                if (s !== '当' && s !== '明') {
+                    count++;
+                }
+            });
+            holidayCounts[staff.id] = count;
+        });
+        
+        // 余剰人員が解消されるまで割り当てる
+        while (surplus > 0) {
+            let bestStaff = null;
+            let maxScore = -999999;
+            
+            for (let i = 0; i < onDutyStaff.length; i++) {
+                const staff = onDutyStaff[i];
+                
+                // --- 制約条件1: 資格基準の検証 ---
+                // この職員が抜けた場合の残りの出勤メンバーをシミュレーション
+                const remaining = onDutyStaff.filter(s => s.id !== staff.id);
+                
+                // 1. 最低人員チェック
+                if (remaining.length < minStaff) continue;
+                
+                // 2. 司令補以上チェック
+                const subCount = remaining.filter(s => s.rank === "消防司令" || s.rank === "消防司令補").length;
+                if (subCount < minSub) continue;
+                
+                // 3. 大型免許チェック
+                const largeCount = remaining.filter(s => s.hasLargeLicense).length;
+                if (largeCount < minLarge) continue;
+                
+                // 4. 救命士チェック
+                const paraCount = remaining.filter(s => s.isParamedic).length;
+                if (paraCount < minPara) continue;
+                
+                // --- 制約条件2: 連休（週休・休暇隣接）回避チェック ---
+                // 週休「休」や他の休暇と隣接していないかをチェック（前後1つ分の当番日 = 2日前、2日後）
+                const rosterKey = `${cycleNum}_${staff.id}`;
+                const schedule = state.roster[rosterKey] || [];
+                
+                let isConsecutiveHoliday = false;
+                
+                // 2日前チェック
+                if (d >= 2) {
+                    const prevShift = schedule[d - 2];
+                    if (prevShift && prevShift !== '当' && prevShift !== '明') {
+                        isConsecutiveHoliday = true;
+                    }
+                }
+                // 2日後チェック
+                if (d <= 25) {
+                    const nextShift = schedule[d + 2];
+                    if (nextShift && nextShift !== '当' && nextShift !== '明') {
+                        isConsecutiveHoliday = true;
+                    }
+                }
+                
+                // スコア計算
+                // 基本スコア：総休日数が少ない職員を優先（公平性の担保）
+                let score = -holidayCounts[staff.id] * 100;
+                
+                // 連休回避の厳格化：隣接している場合は大きなペナルティを与える
+                if (isConsecutiveHoliday) {
+                    score -= 5000;
+                }
+                
+                // 軽微なランダム値を追加して均等化の偏りを防ぐ
+                score += Math.random() * 5;
+                
+                if (score > maxScore) {
+                    maxScore = score;
+                    bestStaff = staff;
+                }
+            }
+            
+            // 休暇を割り当てられる職員が誰もいない場合は当日の調整を中断
+            if (!bestStaff || maxScore < -4000) {
+                // ペナルティスコア（-5000以下）しかない場合は、連休回避制約を厳格に守るために割り当てをパスする
+                break;
+            }
+            
+            // 休暇（年休）の割り当てを実行
+            const rosterKey = `${cycleNum}_${bestStaff.id}`;
+            state.roster[rosterKey][d] = '有'; // 設定にある年休キー
+            
+            // 状態の更新
+            onDutyStaff = onDutyStaff.filter(s => s.id !== bestStaff.id);
+            holidayCounts[bestStaff.id]++;
+            surplus--;
+        }
     }
 }
 
@@ -675,9 +908,27 @@ function updateGenerateButtonText() {
 function bindEvents() {
     // 署所名変更
     document.getElementById('input-station').addEventListener('change', (e) => {
-        state.station = e.target.value.trim() || "本署";
+        const stationName = e.target.value.trim() || "指宿消防署";
+        state.station = stationName;
         updateStationTitle();
-        applyStationVehiclePreset(state.station);
+        applyStationVehiclePreset(stationName);
+        
+        // ユーザー指定のダミーデータ自動切替
+        if (stationName === "指宿消防署") {
+            state.platoonSize = 19;
+            document.getElementById('input-platoon-size').value = 19;
+            loadDefaultStaff();
+            renderStaffInputs();
+            generateEmptyRoster();
+            refreshUI();
+        } else if (stationName === "山川開聞分遣所" || stationName === "頴娃分遣所") {
+            state.platoonSize = 9;
+            document.getElementById('input-platoon-size').value = 9;
+            loadDefaultStaff();
+            renderStaffInputs();
+            generateEmptyRoster();
+            refreshUI();
+        }
     });
 
     // 新規シフト追加
@@ -1017,6 +1268,12 @@ function bindEvents() {
                         state.roster[key] = res.roster[s.id];
                     });
                     
+                    // 余剰人員への休暇自動割り当てが有効な場合
+                    const chkAutoLeave = document.getElementById('chk-auto-leave');
+                    if (chkAutoLeave && chkAutoLeave.checked) {
+                        adjustSurplusLeaves(state.activeCycle);
+                    }
+                    
                     let msg = res.profileMessage;
                     if (regenStartDay > 0) {
                         msg = `【部分的再生成完了】${regenStartDay + 1}日目以降を再編成しました（1〜${regenStartDay}日目は固定）。\n\n` + msg;
@@ -1170,11 +1427,44 @@ function bindEvents() {
                 document.getElementById('input-min-paramedic').value = state.minParamedic;
                 
                 state.hourlyLeaves = data.hourlyLeaves || {};
-                state.vehicleAssignments = data.vehicleAssignments || {};
+                
+                // 後方互換：古いvehicleAssignmentsの「救急車」データを「救急車1」に、「ポンプ車」を「タンク車」に、「通信車」を「卓上通信」にマッピング
+                let loadedAssignments = data.vehicleAssignments || {};
+                for (const dateStr in loadedAssignments) {
+                    if (loadedAssignments[dateStr]) {
+                        if (loadedAssignments[dateStr]["救急車"]) {
+                            loadedAssignments[dateStr]["救急車1"] = loadedAssignments[dateStr]["救急車"];
+                            delete loadedAssignments[dateStr]["救急車"];
+                        }
+                        if (loadedAssignments[dateStr]["ポンプ車"]) {
+                            loadedAssignments[dateStr]["タンク車"] = loadedAssignments[dateStr]["ポンプ車"];
+                            delete loadedAssignments[dateStr]["ポンプ車"];
+                        }
+                        if (loadedAssignments[dateStr]["通信車"]) {
+                            loadedAssignments[dateStr]["卓上通信"] = loadedAssignments[dateStr]["通信車"];
+                            delete loadedAssignments[dateStr]["通信車"];
+                        }
+                    }
+                }
+                state.vehicleAssignments = loadedAssignments;
                 
                 // Load deployed vehicles if present, else apply preset
                 if (data.deployedVehicles) {
-                    state.deployedVehicles = data.deployedVehicles;
+                    let loadedVehicles = [...data.deployedVehicles];
+                    if (loadedVehicles.includes("救急車")) {
+                        loadedVehicles = loadedVehicles.filter(v => v !== "救急車");
+                        if (!loadedVehicles.includes("救急車1")) loadedVehicles.push("救急車1");
+                        if (!loadedVehicles.includes("救急車2")) loadedVehicles.push("救急車2");
+                    }
+                    if (loadedVehicles.includes("ポンプ車")) {
+                        loadedVehicles = loadedVehicles.filter(v => v !== "ポンプ車");
+                        if (!loadedVehicles.includes("タンク車")) loadedVehicles.push("タンク車");
+                    }
+                    if (loadedVehicles.includes("通信車")) {
+                        loadedVehicles = loadedVehicles.filter(v => v !== "通信車");
+                        if (!loadedVehicles.includes("卓上通信")) loadedVehicles.push("卓上通信");
+                    }
+                    state.deployedVehicles = loadedVehicles;
                     syncDeployedVehiclesCheckboxes();
                 } else {
                     applyStationVehiclePreset(state.station);
@@ -1267,12 +1557,62 @@ function bindEvents() {
     // モーダルキャンセル
     document.getElementById('btn-modal-cancel').addEventListener('click', hideShiftModal);
 
+    // ログイン・ログアウトのイベントバインド
+    document.getElementById('btn-login-viewer').addEventListener('click', () => {
+        loginAs('viewer');
+    });
+
+    document.getElementById('login-admin-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const usernameInput = document.getElementById('login-username');
+        const passwordInput = document.getElementById('login-password');
+        const errorMsg = document.getElementById('login-error-msg');
+        
+        const username = usernameInput.value.trim();
+        const password = passwordInput.value;
+        
+        if (username === 'admin' && (password === '119' || password === 'admin')) {
+            errorMsg.style.display = 'none';
+            loginAs('admin');
+        } else {
+            errorMsg.textContent = 'IDまたはパスワードが正しくありません。';
+            errorMsg.style.display = 'block';
+            
+            // エラー表示時のシェイクアニメーションの再トリガー
+            const card = document.querySelector('.login-card');
+            if (card) {
+                card.classList.remove('login-error-msg');
+                void card.offsetWidth; // リフローをトリガーしてアニメーションをリセット
+                card.classList.add('login-error-msg');
+            }
+        }
+    });
+
+    document.getElementById('btn-logout').addEventListener('click', async () => {
+        const confirmLogout = await showCustomConfirm('ログアウトしてもよろしいですか？');
+        if (confirmLogout) {
+            logout();
+        }
+    });
+
     // 車両配置イベントのバインド
     bindVehicleEvents();
 }
 
 // UIの全体更新
 function refreshUI() {
+    // 閲覧専用モードなら各種設定の入力を無効化
+    const isAdmin = state.userRole === 'admin';
+    document.getElementById('input-station').disabled = !isAdmin;
+    document.getElementById('input-start-date').disabled = !isAdmin;
+    document.getElementById('input-platoon-size').disabled = !isAdmin;
+    document.getElementById('input-min-staffing').disabled = !isAdmin;
+    document.getElementById('input-min-subofficer').disabled = !isAdmin;
+    document.getElementById('input-min-large').disabled = !isAdmin;
+    document.getElementById('input-min-paramedic').disabled = !isAdmin;
+    document.getElementById('select-regen-start-day').disabled = !isAdmin;
+    const chkAutoLeave = document.getElementById('chk-auto-leave');
+    if (chkAutoLeave) chkAutoLeave.disabled = !isAdmin;
     
     renderLegend();
     
@@ -2159,6 +2499,7 @@ function calculateHourlyLeaveHours(startTimeStr, endTimeStr, isDayWorker) {
 }
 
 function showShiftModal(staffId, staffName, dayIndex, isPreScheduling = false) {
+    if (state.userRole !== 'admin') return;
     currentEditCell = { staffId, dayIndex, isPreScheduling };
     
     const activeStartDate = new Date(state.startDate);
@@ -2604,9 +2945,14 @@ function validateVehicle(vehicleName, assignments) {
     const warnings = [];
     const roles = {
         "指揮車": ["隊長", "隊員"],
-        "ポンプ車": ["隊長", "機関員", "隊員1", "隊員2"],
-        "救急車": ["隊長", "救命士", "機関員"],
-        "救助工作車": ["隊長", "機関員", "隊員1", "隊員2"]
+        "タンク車": ["隊長", "機関員", "隊員1", "隊員2"],
+        "救急車1": ["隊長", "救命士", "機関員"],
+        "救急車2": ["隊長", "救命士", "機関員"],
+        "救助工作車": ["隊長", "機関員", "隊員1", "隊員2"],
+        "はしご車": ["隊長", "機関員", "隊員"],
+        "拠点機能車": ["隊長", "機関員", "隊員"],
+        "予備車": ["隊長", "機関員", "隊員"],
+        "卓上通信": ["隊長", "機関員", "隊員"]
     }[vehicleName];
     
     if (!roles) return { status: "OK", warnings: [] };
@@ -2637,7 +2983,7 @@ function validateVehicle(vehicleName, assignments) {
             }
         }
         
-        if (vehicleName === "救急車" && role === "救命士") {
+        if ((vehicleName === "救急車1" || vehicleName === "救急車2") && role === "救命士") {
             if (!staff.isParamedic) {
                 warnings.push(`救命士の${staff.name}は救命士資格がありません`);
             }
@@ -2711,94 +3057,145 @@ function renderVehicleView() {
     const staffListEl = document.getElementById('vehicle-staff-list');
     staffListEl.innerHTML = '';
     
-    onDutyStaff.forEach(staff => {
-        const item = document.createElement('div');
-        item.className = 'vehicle-staff-item';
-        item.style.display = 'flex';
-        item.style.alignItems = 'center';
-        item.style.justifyContent = 'space-between';
-        item.style.padding = '8px 12px';
-        item.style.border = '1px solid var(--border-color)';
-        item.style.borderRadius = '6px';
-        item.style.background = 'var(--bg-card)';
-        item.style.fontSize = '13px';
-        item.style.transition = 'all 0.2s';
+    // 階級グループの定義（上から順に表示）
+    const rankGroups = [
+        { title: "消防司令", ranks: ["消防司令"] },
+        { title: "消防司令補", ranks: ["消防司令補"] },
+        { title: "消防士長", ranks: ["消防士長"] },
+        { title: "消防副士長", ranks: ["消防副士長"] },
+        { title: "消防士", ranks: ["消防士"] }
+    ];
+
+    let isFirstGroup = true;
+    rankGroups.forEach(group => {
+        const membersInGroup = onDutyStaff.filter(staff => group.ranks.includes(staff.rank));
+        if (membersInGroup.length === 0) return; // この階級の職員がいない場合は表示しない
         
-        if (assignedStaffIds.has(staff.id)) {
-            item.style.opacity = '0.4';
-            item.style.background = 'var(--secondary-bg)';
-        }
+        // 階級グループヘッダーの作成
+        const groupHeader = document.createElement('div');
+        groupHeader.className = 'vehicle-staff-group-header';
+        groupHeader.style.fontSize = '11px';
+        groupHeader.style.fontWeight = '700';
+        groupHeader.style.color = 'var(--text-secondary)';
+        groupHeader.style.marginTop = isFirstGroup ? '0px' : '16px';
+        groupHeader.style.marginBottom = '6px';
+        groupHeader.style.padding = '3px 8px';
+        groupHeader.style.borderLeft = '3px solid var(--primary-color)';
+        groupHeader.style.backgroundColor = 'var(--secondary-bg)';
+        groupHeader.style.borderRadius = '3px';
+        groupHeader.style.display = 'flex';
+        groupHeader.style.justifyContent = 'space-between';
+        groupHeader.style.alignItems = 'center';
         
-        // 名前と階級
-        const nameArea = document.createElement('div');
-        nameArea.style.display = 'flex';
-        nameArea.style.alignItems = 'center';
-        nameArea.style.gap = '8px';
+        const groupTitle = document.createElement('span');
+        groupTitle.textContent = group.title;
+        const groupCount = document.createElement('span');
+        groupCount.style.fontSize = '10px';
+        groupCount.style.opacity = '0.8';
+        groupCount.textContent = `${membersInGroup.length}名`;
         
-        const rankBadge = document.createElement('span');
-        rankBadge.className = 'staff-rank-badge';
-        rankBadge.textContent = getRankAbbr(staff.rank);
-        nameArea.appendChild(rankBadge);
+        groupHeader.appendChild(groupTitle);
+        groupHeader.appendChild(groupCount);
+        staffListEl.appendChild(groupHeader);
         
-        const nameSpan = document.createElement('span');
-        nameSpan.style.fontWeight = '500';
-        nameSpan.textContent = staff.name;
-        nameArea.appendChild(nameSpan);
+        isFirstGroup = false;
+
+        // メンバーリスト用コンテナ
+        const groupContainer = document.createElement('div');
+        groupContainer.style.display = 'flex';
+        groupContainer.style.flexDirection = 'column';
+        groupContainer.style.gap = '6px';
+        staffListEl.appendChild(groupContainer);
         
-        if (staff.isSupport) {
-            const supportBadge = document.createElement('span');
-            supportBadge.className = 'badge-support';
-            supportBadge.style.fontSize = '10px';
-            supportBadge.style.padding = '1px 4px';
-            supportBadge.textContent = `応援:${staff.origin}`;
-            nameArea.appendChild(supportBadge);
-        }
-        
-        item.appendChild(nameArea);
-        
-        // 資格バッジ
-        const qualsArea = document.createElement('div');
-        qualsArea.style.display = 'flex';
-        qualsArea.style.gap = '4px';
-        
-        if (staff.hasLargeLicense) {
-            const badge = document.createElement('span');
-            badge.className = 'qual-badge qual-badge-large';
-            badge.textContent = '大';
-            badge.title = '大型免許';
-            qualsArea.appendChild(badge);
-        }
-        if (staff.isParamedic) {
-            const badge = document.createElement('span');
-            badge.className = 'qual-badge qual-badge-paramedic';
-            badge.textContent = '救';
-            badge.title = '救急救命士';
-            qualsArea.appendChild(badge);
-        }
-        if (staff.isRescue) {
-            const badge = document.createElement('span');
-            badge.className = 'qual-badge qual-badge-rescue';
-            badge.textContent = 'R';
-            badge.title = '救助隊員';
-            qualsArea.appendChild(badge);
-        }
-        if (staff.isKikan) {
-            const badge = document.createElement('span');
-            badge.className = 'qual-badge qual-badge-kikan';
-            badge.textContent = '機';
-            badge.title = '機関員指定';
-            qualsArea.appendChild(badge);
-        }
-        if (staff.isDayWorker) {
-            const badge = document.createElement('span');
-            badge.className = 'qual-badge qual-badge-dayworker';
-            badge.textContent = '日';
-            badge.title = '日勤者';
-            qualsArea.appendChild(badge);
-        }
-        
-        item.appendChild(qualsArea);
-        staffListEl.appendChild(item);
+        membersInGroup.forEach(staff => {
+            const item = document.createElement('div');
+            item.className = 'vehicle-staff-item';
+            item.style.display = 'flex';
+            item.style.alignItems = 'center';
+            item.style.justifyContent = 'space-between';
+            item.style.padding = '8px 12px';
+            item.style.border = '1px solid var(--border-color)';
+            item.style.borderRadius = '6px';
+            item.style.background = 'var(--bg-card)';
+            item.style.fontSize = '13px';
+            item.style.transition = 'all 0.2s';
+            
+            if (assignedStaffIds.has(staff.id)) {
+                item.style.opacity = '0.4';
+                item.style.background = 'var(--secondary-bg)';
+            }
+            
+            // 名前と階級
+            const nameArea = document.createElement('div');
+            nameArea.style.display = 'flex';
+            nameArea.style.alignItems = 'center';
+            nameArea.style.gap = '8px';
+            
+            const rankBadge = document.createElement('span');
+            rankBadge.className = 'staff-rank-badge';
+            rankBadge.textContent = getRankAbbr(staff.rank);
+            nameArea.appendChild(rankBadge);
+            
+            const nameSpan = document.createElement('span');
+            nameSpan.style.fontWeight = '500';
+            nameSpan.textContent = staff.name;
+            nameArea.appendChild(nameSpan);
+            
+            if (staff.isSupport) {
+                const supportBadge = document.createElement('span');
+                supportBadge.className = 'badge-support';
+                supportBadge.style.fontSize = '10px';
+                supportBadge.style.padding = '1px 4px';
+                supportBadge.textContent = `応援:${staff.origin}`;
+                nameArea.appendChild(supportBadge);
+            }
+            
+            item.appendChild(nameArea);
+            
+            // 資格バッジ
+            const qualsArea = document.createElement('div');
+            qualsArea.style.display = 'flex';
+            qualsArea.style.gap = '4px';
+            
+            if (staff.hasLargeLicense) {
+                const badge = document.createElement('span');
+                badge.className = 'qual-badge qual-badge-large';
+                badge.textContent = '大';
+                badge.title = '大型免許';
+                qualsArea.appendChild(badge);
+            }
+            if (staff.isParamedic) {
+                const badge = document.createElement('span');
+                badge.className = 'qual-badge qual-badge-paramedic';
+                badge.textContent = '救';
+                badge.title = '救急救命士';
+                qualsArea.appendChild(badge);
+            }
+            if (staff.isRescue) {
+                const badge = document.createElement('span');
+                badge.className = 'qual-badge qual-badge-rescue';
+                badge.textContent = 'R';
+                badge.title = '救助隊員';
+                qualsArea.appendChild(badge);
+            }
+            if (staff.isKikan) {
+                const badge = document.createElement('span');
+                badge.className = 'qual-badge qual-badge-kikan';
+                badge.textContent = '機';
+                badge.title = '機関員指定';
+                qualsArea.appendChild(badge);
+            }
+            if (staff.isDayWorker) {
+                const badge = document.createElement('span');
+                badge.className = 'qual-badge qual-badge-dayworker';
+                badge.textContent = '日';
+                badge.title = '日勤者';
+                qualsArea.appendChild(badge);
+            }
+            
+            item.appendChild(qualsArea);
+            groupContainer.appendChild(item);
+        });
     });
     
     // 各スロット（ドロップダウン）の選択肢を更新
@@ -2807,6 +3204,7 @@ function renderVehicleView() {
         const vehicle = select.dataset.vehicle;
         const role = select.dataset.role;
         
+        select.disabled = (state.userRole !== 'admin');
         select.innerHTML = '<option value="">-- 未指定 --</option>';
         
         onDutyStaff.forEach(staff => {
@@ -2842,7 +3240,7 @@ function renderVehicleView() {
     
     // 各車両カードのステータスバッジと警告文の更新
     const vehicleCards = document.querySelectorAll('.vehicle-card');
-    const activeVehicles = state.deployedVehicles || ["指揮車", "ポンプ車", "救急車", "救助工作車"];
+    const activeVehicles = (state.deployedVehicles && state.deployedVehicles.length > 0) ? state.deployedVehicles : ["指揮車", "タンク車", "救急車1", "救急車2", "救助工作車", "はしご車", "拠点機能車", "予備車", "卓上通信"];
     
     vehicleCards.forEach(card => {
         const vehicleName = card.dataset.vehicle;
@@ -3128,21 +3526,36 @@ function suggestVehicleAssignments(dateStr) {
     }
     
     // 配置スロットの優先順位リスト（厳しい制約・重要車両から順に貪欲配置）
-    const activeVehicles = state.deployedVehicles || ["指揮車", "ポンプ車", "救急車", "救助工作車"];
+    const activeVehicles = (state.deployedVehicles && state.deployedVehicles.length > 0) ? state.deployedVehicles : ["指揮車", "タンク車", "救急車1", "救急車2", "救助工作車", "はしご車", "拠点機能車", "予備車", "卓上通信"];
     const prioritySlots = [
-        { vehicle: "救急車", role: "救命士" },
-        { vehicle: "救急車", role: "機関員" },
-        { vehicle: "ポンプ車", role: "機関員" },
+        { vehicle: "救急車1", role: "救命士" },
+        { vehicle: "救急車2", role: "救命士" },
+        { vehicle: "救急車1", role: "機関員" },
+        { vehicle: "救急車2", role: "機関員" },
+        { vehicle: "タンク車", role: "機関員" },
         { vehicle: "救助工作車", role: "機関員" },
+        { vehicle: "はしご車", role: "機関員" },
+        { vehicle: "拠点機能車", role: "機関員" },
+        { vehicle: "予備車", role: "機関員" },
+        { vehicle: "卓上通信", role: "機関員" },
         { vehicle: "救助工作車", role: "隊員1" },
         { vehicle: "救助工作車", role: "隊員2" },
         { vehicle: "指揮車", role: "隊長" },
-        { vehicle: "ポンプ車", role: "隊長" },
+        { vehicle: "タンク車", role: "隊長" },
         { vehicle: "救助工作車", role: "隊長" },
-        { vehicle: "救急車", role: "隊長" },
+        { vehicle: "はしご車", role: "隊長" },
+        { vehicle: "拠点機能車", role: "隊長" },
+        { vehicle: "予備車", role: "隊長" },
+        { vehicle: "卓上通信", role: "隊長" },
+        { vehicle: "救急車1", role: "隊長" },
+        { vehicle: "救急車2", role: "隊長" },
         { vehicle: "指揮車", role: "隊員" },
-        { vehicle: "ポンプ車", role: "隊員1" },
-        { vehicle: "ポンプ車", role: "隊員2" }
+        { vehicle: "タンク車", role: "隊員1" },
+        { vehicle: "タンク車", role: "隊員2" },
+        { vehicle: "はしご車", role: "隊員" },
+        { vehicle: "拠点機能車", role: "隊員" },
+        { vehicle: "予備車", role: "隊員" },
+        { vehicle: "卓上通信", role: "隊員" }
     ].filter(slot => activeVehicles.includes(slot.vehicle));
     
     const assigned = {};
@@ -3180,9 +3593,18 @@ function suggestVehicleAssignments(dateStr) {
                 score += 1000;
             }
             
-            // 隊長スロット: 階級上位者を優先
+            // 隊長スロット: まずは司令補以上（司令・司令補）、次に士長以上（士長）を優先選択
             if (role === "隊長") {
                 const rankVal = getRankVal(staff.rank);
+                
+                // 階級優先度の付与
+                if (rankVal <= 2) {
+                    score += 2000; // 司令補以上 (消防司令・消防司令補)
+                } else if (rankVal <= 3) {
+                    score += 1000; // 士長以上 (消防士長)
+                }
+                
+                // 階級序列が上位の者を優先
                 score += (6 - rankVal) * 100;
                 
                 if (vehicle === "指揮車") {
@@ -3191,6 +3613,11 @@ function suggestVehicleAssignments(dateStr) {
                 } else {
                     if (staff.rank === "消防司令補") score += 100;
                     if (staff.rank === "消防士長") score += 50;
+                }
+                
+                // 救助工作車の隊長は救助隊員資格（R）を優先
+                if (vehicle === "救助工作車" && staff.isRescue) {
+                    score += 300;
                 }
             }
             
@@ -3231,29 +3658,49 @@ function suggestVehicleAssignments(dateStr) {
 // 署所名から配備車両のプリセットを設定する
 function applyStationVehiclePreset(stationName) {
     const chkShiki = document.getElementById('chk-vehicle-shiki');
-    const chkPump = document.getElementById('chk-vehicle-pump');
-    const chkKyukyu = document.getElementById('chk-vehicle-kyukyu');
+    const chkTank = document.getElementById('chk-vehicle-tank');
+    const chkKyukyu1 = document.getElementById('chk-vehicle-kyukyu1');
+    const chkKyukyu2 = document.getElementById('chk-vehicle-kyukyu2');
     const chkKyujo = document.getElementById('chk-vehicle-kyujo');
+    const chkHashigo = document.getElementById('chk-vehicle-hashigo');
+    const chkKyoten = document.getElementById('chk-vehicle-kyoten');
+    const chkYobi = document.getElementById('chk-vehicle-yobi');
+    const chkTsushin = document.getElementById('chk-vehicle-tsushin');
     
-    if (!chkShiki || !chkPump || !chkKyukyu || !chkKyujo) return;
+    if (!chkShiki || !chkTank || !chkKyukyu1 || !chkKyukyu2 || !chkKyujo || !chkHashigo || !chkKyoten || !chkYobi || !chkTsushin) return;
     
     const name = stationName.trim();
     if (name === "南署" || name === "南分署") {
         chkShiki.checked = false;
-        chkPump.checked = true;
-        chkKyukyu.checked = true;
+        chkTank.checked = true;
+        chkKyukyu1.checked = true;
+        chkKyukyu2.checked = true;
         chkKyujo.checked = false;
+        chkHashigo.checked = false;
+        chkKyoten.checked = false;
+        chkYobi.checked = false;
+        chkTsushin.checked = false;
     } else if (name === "北署" || name === "北分署") {
         chkShiki.checked = false;
-        chkPump.checked = true;
-        chkKyukyu.checked = false;
+        chkTank.checked = true;
+        chkKyukyu1.checked = false;
+        chkKyukyu2.checked = false;
         chkKyujo.checked = true;
+        chkHashigo.checked = true;
+        chkKyoten.checked = false;
+        chkYobi.checked = false;
+        chkTsushin.checked = false;
     } else {
         // 本署またはその他は全車両をチェック
         chkShiki.checked = true;
-        chkPump.checked = true;
-        chkKyukyu.checked = true;
+        chkTank.checked = true;
+        chkKyukyu1.checked = true;
+        chkKyukyu2.checked = true;
         chkKyujo.checked = true;
+        chkHashigo.checked = true;
+        chkKyoten.checked = true;
+        chkYobi.checked = true;
+        chkTsushin.checked = true;
     }
     updateDeployedVehiclesState();
 }
@@ -3262,28 +3709,43 @@ function applyStationVehiclePreset(stationName) {
 function updateDeployedVehiclesState() {
     state.deployedVehicles = [];
     if (document.getElementById('chk-vehicle-shiki').checked) state.deployedVehicles.push("指揮車");
-    if (document.getElementById('chk-vehicle-pump').checked) state.deployedVehicles.push("ポンプ車");
-    if (document.getElementById('chk-vehicle-kyukyu').checked) state.deployedVehicles.push("救急車");
+    if (document.getElementById('chk-vehicle-tank').checked) state.deployedVehicles.push("タンク車");
+    if (document.getElementById('chk-vehicle-kyukyu1').checked) state.deployedVehicles.push("救急車1");
+    if (document.getElementById('chk-vehicle-kyukyu2').checked) state.deployedVehicles.push("救急車2");
     if (document.getElementById('chk-vehicle-kyujo').checked) state.deployedVehicles.push("救助工作車");
+    if (document.getElementById('chk-vehicle-hashigo').checked) state.deployedVehicles.push("はしご車");
+    if (document.getElementById('chk-vehicle-kyoten').checked) state.deployedVehicles.push("拠点機能車");
+    if (document.getElementById('chk-vehicle-yobi').checked) state.deployedVehicles.push("予備車");
+    if (document.getElementById('chk-vehicle-tsushin').checked) state.deployedVehicles.push("卓上通信");
 }
 
 // 配備車両リストからチェックボックスの選択状態を同期する
 function syncDeployedVehiclesCheckboxes() {
-    const list = state.deployedVehicles || ["指揮車", "ポンプ車", "救急車", "救助工作車"];
+    const list = (state.deployedVehicles && state.deployedVehicles.length > 0) ? state.deployedVehicles : ["指揮車", "タンク車", "救急車1", "救急車2", "救助工作車", "はしご車", "拠点機能車", "予備車", "卓上通信"];
     const chkShiki = document.getElementById('chk-vehicle-shiki');
-    const chkPump = document.getElementById('chk-vehicle-pump');
-    const chkKyukyu = document.getElementById('chk-vehicle-kyukyu');
+    const chkTank = document.getElementById('chk-vehicle-tank');
+    const chkKyukyu1 = document.getElementById('chk-vehicle-kyukyu1');
+    const chkKyukyu2 = document.getElementById('chk-vehicle-kyukyu2');
     const chkKyujo = document.getElementById('chk-vehicle-kyujo');
+    const chkHashigo = document.getElementById('chk-vehicle-hashigo');
+    const chkKyoten = document.getElementById('chk-vehicle-kyoten');
+    const chkYobi = document.getElementById('chk-vehicle-yobi');
+    const chkTsushin = document.getElementById('chk-vehicle-tsushin');
     
     if (chkShiki) chkShiki.checked = list.includes("指揮車");
-    if (chkPump) chkPump.checked = list.includes("ポンプ車");
-    if (chkKyukyu) chkKyukyu.checked = list.includes("救急車");
+    if (chkTank) chkTank.checked = list.includes("タンク車");
+    if (chkKyukyu1) chkKyukyu1.checked = list.includes("救急車1");
+    if (chkKyukyu2) chkKyukyu2.checked = list.includes("救急車2");
     if (chkKyujo) chkKyujo.checked = list.includes("救助工作車");
+    if (chkHashigo) chkHashigo.checked = list.includes("はしご車");
+    if (chkKyoten) chkKyoten.checked = list.includes("拠点機能車");
+    if (chkYobi) chkYobi.checked = list.includes("予備車");
+    if (chkTsushin) chkTsushin.checked = list.includes("卓上通信");
 }
 
 // 運用車両チェックボックスの変更イベントを監視する
 function bindVehicleCheckboxEvents() {
-    ['shiki', 'pump', 'kyukyu', 'kyujo'].forEach(id => {
+    ['shiki', 'tank', 'kyukyu1', 'kyukyu2', 'kyujo', 'hashigo', 'kyoten', 'yobi', 'tsushin'].forEach(id => {
         const chk = document.getElementById(`chk-vehicle-${id}`);
         if (chk) {
             chk.addEventListener('change', () => {
