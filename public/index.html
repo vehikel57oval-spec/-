@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>消防勤務管理 & 勤怠ポータル</title>
+    
+    <!-- safeStorage 定義および例外バウンダリ・診断バナー -->
+    <script>
+        (function() {
+            var storageMock = {
+                _data: {},
+                getItem: function(key) { return key in this._data ? this._data[key] : null; },
+                setItem: function(key, val) { this._data[key] = String(val); },
+                removeItem: function(key) { delete this._data[key]; },
+                clear: function() { this._data = {}; }
+            };
+            try {
+                var testKey = '__storage_test__';
+                window.localStorage.setItem(testKey, testKey);
+                window.localStorage.removeItem(testKey);
+                window.safeStorage = window.localStorage;
+            } catch (e) {
+                console.warn('localStorage is blocked or unavailable. Falling back to memory storage.', e);
+                window.safeStorage = storageMock;
+            }
+        })();
+
+        // クライアント側エラーハンドリング
+        window.addEventListener('error', function(event) {
+            handleClientError({
+                type: 'uncaught_exception',
+                message: event.message,
+                filename: event.filename,
+                lineno: event.lineno,
+                colno: event.colno,
+                stack: event.error ? event.error.stack : null
+            });
+        });
+
+        window.addEventListener('unhandledrejection', function(event) {
+            handleClientError({
+                type: 'unhandled_rejection',
+                message: event.reason ? (event.reason.message || String(event.reason)) : 'Unknown rejection',
+                stack: event.reason ? event.reason.stack : null
+            });
+        });
+
+        window.addEventListener('securitypolicyviolation', function(event) {
+            handleClientError({
+                type: 'csp_violation',
+                message: 'CSP Violated: ' + event.blockedURI + ' (directive: ' + event.violatedDirective + ')',
+                filename: event.sourceFile,
+                lineno: event.lineNumber
+            });
+        });
+
+        function handleClientError(errData) {
+            console.error('Captured exception:', errData);
+            
+            // 診断用バナーの作成
+            setTimeout(function() {
+                var container = document.getElementById('client-error-overlay');
+                if (!container) {
+                    container = document.createElement('div');
+                    container.id = 'client-error-overlay';
+                    container.style.position = 'fixed';
+                    container.style.top = '10px';
+                    container.style.left = '10px';
+                    container.style.right = '10px';
+                    container.style.backgroundColor = '#2c1616';
+                    container.style.border = '2px solid #ea4335';
+                    container.style.borderRadius = '8px';
+                    container.style.color = '#f5c6cb';
+                    container.style.padding = '15px';
+                    container.style.zIndex = '99999';
+                    container.style.fontFamily = 'monospace';
+                    container.style.fontSize = '12px';
+                    container.style.maxHeight = '40vh';
+                    container.style.overflowY = 'auto';
+                    
+                    var title = document.createElement('h4');
+                    title.style.margin = '0 0 10px 0';
+                    title.style.color = '#ea4335';
+                    title.style.fontSize = '14px';
+                    title.innerText = '🚨 システムエラーが検出されました (開発者にご報告ください)';
+                    container.appendChild(title);
+                    
+                    var sub = document.createElement('p');
+                    sub.style.margin = '0 0 10px 0';
+                    sub.innerText = '以下のエラーが発生したため、ログイン画面や打刻機能が正常に機能しない可能性があります。';
+                    container.appendChild(sub);
+
+                    var pre = document.createElement('pre');
+                    pre.id = 'client-error-details';
+                    pre.style.margin = '0 0 10px 0';
+                    pre.style.whiteSpace = 'pre-wrap';
+                    pre.style.backgroundColor = '#1a0b0b';
+                    pre.style.padding = '8px';
+                    pre.style.borderRadius = '4px';
+                    pre.style.border = '1px solid #4a1a1a';
+                    container.appendChild(pre);
+
+                    var btn = document.createElement('button');
+                    btn.innerText = 'エラー情報をクリップボードにコピー';
+                    btn.style.backgroundColor = '#ea4335';
+                    btn.style.color = '#fff';
+                    btn.style.border = 'none';
+                    btn.style.padding = '6px 12px';
+                    btn.style.borderRadius = '4px';
+                    btn.style.cursor = 'pointer';
+                    btn.onclick = function() {
+                        navigator.clipboard.writeText(JSON.stringify(errData, null, 2));
+                        alert('コピーしました。開発者へお送りください。');
+                    };
+                    container.appendChild(btn);
+
+                    var closeBtn = document.createElement('button');
+                    closeBtn.innerText = '閉じる';
+                    closeBtn.style.backgroundColor = '#555';
+                    closeBtn.style.color = '#fff';
+                    closeBtn.style.border = 'none';
+                    closeBtn.style.padding = '6px 12px';
+                    closeBtn.style.borderRadius = '4px';
+                    closeBtn.style.cursor = 'pointer';
+                    closeBtn.style.marginLeft = '10px';
+                    closeBtn.onclick = function() {
+                        container.style.display = 'none';
+                    };
+                    container.appendChild(closeBtn);
+
+                    document.body.appendChild(container);
+                }
+                
+                var preEl = document.getElementById('client-error-details');
+                if (preEl) {
+                    preEl.innerText = (preEl.innerText ? preEl.innerText + '\n\n' : '') + 
+                        '【' + errData.type + '】: ' + errData.message + 
+                        (errData.filename ? '\nファイル: ' + errData.filename : '') + 
+                        (errData.lineno ? ' (行 ' + errData.lineno + ')' : '') + 
+                        (errData.stack ? '\nスタック:\n' + errData.stack : '');
+                }
+            }, 100);
+
+            // サーバーへの送信試行
+            try {
+                var url = '/api/auth/log-error';
+                var body = JSON.stringify(errData);
+                if (navigator.sendBeacon) {
+                    navigator.sendBeacon(url, body);
+                } else {
+                    fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: body
+                    });
+                }
+            } catch (e) {
+                console.error('Error logging to backend:', e);
+            }
+        }
+    </script>
+    
+    <!-- プレミアムフォント -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@300;400;500;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- アイコンライブラリ (Lucide Icons) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- スタイルシート -->
+    <link rel="stylesheet" href="/css/portal.css">
+</head>
+<body data-theme="light">
+    <!-- メインSPAマウントポイント -->
+    <div id="app">
+        <!-- 初期読み込みローダー -->
+        <div class="loader-container" id="initial-loader">
+            <div class="spinner"></div>
+            <p>システムを読み込み中...</p>
+        </div>
+    </div>
+    
+    <!-- トースト通知コンテナ -->
+    <div id="toast-container" class="toast-container"></div>
+    
+    <!-- モーダルウィンドウコンテナ -->
+    <div id="modal-container" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <button class="modal-close" onclick="Portal.closeModal()">&times;</button>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- アプリケーションスクリプト -->
+    <script src="/js/auth.js?v=1.0.4"></script>
+    <script src="/js/dashboard.js?v=1.0.4"></script>
+    <script src="/js/attendance.js?v=1.0.4"></script>
+    <script src="/js/portal.js?v=1.0.4"></script>
+</body>
+</html>
