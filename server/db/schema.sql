@@ -141,3 +141,27 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(staff_id) REFERENCES staff(id)
 );
+
+-- 稼働車両設定テーブル
+CREATE TABLE IF NOT EXISTS deployed_vehicles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    station_id INTEGER NOT NULL,
+    vehicle_name TEXT NOT NULL,
+    is_active INTEGER DEFAULT 1,
+    UNIQUE(station_id, vehicle_name),
+    FOREIGN KEY(station_id) REFERENCES stations(id)
+);
+
+-- 車両配置（乗車割り当て）テーブル
+CREATE TABLE IF NOT EXISTS vehicle_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_date TEXT NOT NULL, -- YYYY-MM-DD
+    station_id INTEGER NOT NULL,
+    vehicle_name TEXT NOT NULL,
+    role_name TEXT NOT NULL, -- 機関員, 隊長, 隊員1, etc.
+    staff_id INTEGER NOT NULL,
+    UNIQUE(work_date, station_id, vehicle_name, role_name),
+    FOREIGN KEY(station_id) REFERENCES stations(id),
+    FOREIGN KEY(staff_id) REFERENCES staff(id)
+);
+

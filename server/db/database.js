@@ -12,7 +12,10 @@ let dbData = {
     schedule_entries: [],
     leave_requests: [],
     rounding_settings: [],
-    audit_logs: []
+    audit_logs: [],
+    deployed_vehicles: [],
+    vehicle_assignments: [],
+    schedule_staff_overrides: []
 };
 
 // シードデータ（初期データ）
@@ -28,9 +31,9 @@ function seedData() {
     });
 
     dbData.stations.push(
-        { id: 1, department_id: 1, name: '指宿消防署（本署）', code: 'honsho' },
-        { id: 2, department_id: 1, name: '山川分遣所（北署）', code: 'kita' },
-        { id: 3, department_id: 1, name: '開聞分遣所（南署）', code: 'minami' }
+        { id: 1, department_id: 1, name: '指宿消防署', code: 'honsho' },
+        { id: 2, department_id: 1, name: '山川開聞分遣所', code: 'yamagawa' },
+        { id: 3, department_id: 1, name: '頴娃分遣所', code: 'ei' }
     );
 
     dbData.rounding_settings.push({
@@ -44,25 +47,106 @@ function seedData() {
 
     const hash = '$2a$10$Rn57sxVVD7stNaMSBna7u.X6hzt9CMgmRovgdtsC3tZpqwq0aoGXG'; // '1234' (bcryptjs互換ハッシュ)
     const staffList = [
-        // 本署
+        // ==========================================
+        // 指宿消防署 (station_id: 1) — 38名
+        // 日勤者: 署長1名, 副署長1名, 事務1名, 予防係2名, 通信員1名 = 6名
+        // 当務者: 1部16名 + 2部16名 = 32名
+        // ==========================================
+        // --- 日勤者 (6名) ---
         { id: 1, department_id: 1, station_id: 1, employee_number: '0001', pin_hash: hash, name: 'システム管理者', platoon: 'nikkin', rank: '情報管理主任', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 1, role: 'sysadmin', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
         { id: 2, department_id: 1, station_id: 1, employee_number: '1001', pin_hash: hash, name: '田中 太郎', platoon: 'nikkin', rank: '消防司令', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 1, role: 'admin', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
-        { id: 3, department_id: 1, station_id: 1, employee_number: '1002', pin_hash: hash, name: '鈴木 一郎', platoon: '1bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
-        { id: 4, department_id: 1, station_id: 1, employee_number: '1003', pin_hash: hash, name: '佐藤 次郎', platoon: '2bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 0, is_rescue: 1, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 18.5, is_active: 1, created_at: new Date().toISOString() },
-        { id: 5, department_id: 1, station_id: 1, employee_number: '1004', pin_hash: hash, name: '高橋 健二', platoon: '1bu', rank: '消防士長', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 15.0, is_active: 1, created_at: new Date().toISOString() },
-        { id: 6, department_id: 1, station_id: 1, employee_number: '1005', pin_hash: hash, name: '渡辺 誠', platoon: '2bu', rank: '消防士長', has_large_license: 1, is_paramedic: 0, is_rescue: 1, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
-        { id: 7, department_id: 1, station_id: 1, employee_number: '1006', pin_hash: hash, name: '伊藤 翼', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 12.0, is_active: 1, created_at: new Date().toISOString() },
-        { id: 8, department_id: 1, station_id: 1, employee_number: '1007', pin_hash: hash, name: '小林 翔', platoon: '2bu', rank: '消防士', has_large_license: 1, is_paramedic: 0, is_rescue: 1, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
-        // 北署
-        { id: 9, department_id: 1, station_id: 2, employee_number: '2001', pin_hash: hash, name: '中村 護', platoon: '1bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
-        { id: 10, department_id: 1, station_id: 2, employee_number: '2002', pin_hash: hash, name: '加藤 恵', platoon: '2bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'chief', annual_leave_balance: 16.0, is_active: 1, created_at: new Date().toISOString() },
-        { id: 11, department_id: 1, station_id: 2, employee_number: '2003', pin_hash: hash, name: '吉田 大輔', platoon: '1bu', rank: '消防士長', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 14.5, is_active: 1, created_at: new Date().toISOString() },
-        { id: 12, department_id: 1, station_id: 2, employee_number: '2004', pin_hash: hash, name: '山田 花子', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
-        // 南署
-        { id: 13, department_id: 1, station_id: 3, employee_number: '3001', pin_hash: hash, name: '佐々木 茂', platoon: '1bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 19.0, is_active: 1, created_at: new Date().toISOString() },
-        { id: 14, department_id: 1, station_id: 3, employee_number: '3002', pin_hash: hash, name: '山口 剛', platoon: '2bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
-        { id: 15, department_id: 1, station_id: 3, employee_number: '3003', pin_hash: hash, name: '松本 淳', platoon: '1bu', rank: '消防士長', has_large_license: 0, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 11.0, is_active: 1, created_at: new Date().toISOString() },
-        { id: 16, department_id: 1, station_id: 3, employee_number: '3004', pin_hash: hash, name: '井上 陸', platoon: '2bu', rank: '消防士', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() }
+        { id: 3, department_id: 1, station_id: 1, employee_number: '1002', pin_hash: hash, name: '鈴木 一郎', platoon: 'nikkin', rank: '消防司令', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 1, role: 'admin', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 4, department_id: 1, station_id: 1, employee_number: '1003', pin_hash: hash, name: '佐藤 美咲', platoon: 'nikkin', rank: '消防士長', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 1, role: 'staff', annual_leave_balance: 18.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 5, department_id: 1, station_id: 1, employee_number: '1004', pin_hash: hash, name: '高橋 健二', platoon: 'nikkin', rank: '消防司令補', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 1, role: 'staff', annual_leave_balance: 19.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 6, department_id: 1, station_id: 1, employee_number: '1005', pin_hash: hash, name: '渡辺 誠', platoon: 'nikkin', rank: '消防司令補', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 1, role: 'staff', annual_leave_balance: 17.5, is_active: 1, created_at: new Date().toISOString() },
+        // --- 1部 (16名) ---
+        { id: 7,  department_id: 1, station_id: 1, employee_number: '1101', pin_hash: hash, name: '伊藤 浩一', platoon: '1bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 8,  department_id: 1, station_id: 1, employee_number: '1102', pin_hash: hash, name: '中村 大輔', platoon: '1bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 19.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 9,  department_id: 1, station_id: 1, employee_number: '1103', pin_hash: hash, name: '小林 翔太', platoon: '1bu', rank: '消防士長', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 18.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 10, department_id: 1, station_id: 1, employee_number: '1104', pin_hash: hash, name: '加藤 隆志', platoon: '1bu', rank: '消防士長', has_large_license: 1, is_paramedic: 0, is_rescue: 1, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 17.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 11, department_id: 1, station_id: 1, employee_number: '1105', pin_hash: hash, name: '吉田 誠一', platoon: '1bu', rank: '消防士長', has_large_license: 1, is_paramedic: 0, is_rescue: 1, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 16.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 12, department_id: 1, station_id: 1, employee_number: '1106', pin_hash: hash, name: '山田 拓也', platoon: '1bu', rank: '消防副士長', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 15.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 13, department_id: 1, station_id: 1, employee_number: '1107', pin_hash: hash, name: '佐々木 亮', platoon: '1bu', rank: '消防副士長', has_large_license: 0, is_paramedic: 0, is_rescue: 1, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 14.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 14, department_id: 1, station_id: 1, employee_number: '1108', pin_hash: hash, name: '松本 和也', platoon: '1bu', rank: '消防副士長', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 14.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 15, department_id: 1, station_id: 1, employee_number: '1109', pin_hash: hash, name: '井上 直樹', platoon: '1bu', rank: '消防士', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 13.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 16, department_id: 1, station_id: 1, employee_number: '1110', pin_hash: hash, name: '木村 康平', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 1, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 12.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 17, department_id: 1, station_id: 1, employee_number: '1111', pin_hash: hash, name: '林 大地', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 12.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 18, department_id: 1, station_id: 1, employee_number: '1112', pin_hash: hash, name: '清水 裕太', platoon: '1bu', rank: '消防士', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 11.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 19, department_id: 1, station_id: 1, employee_number: '1113', pin_hash: hash, name: '山崎 光', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 20, department_id: 1, station_id: 1, employee_number: '1114', pin_hash: hash, name: '池田 蓮', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 21, department_id: 1, station_id: 1, employee_number: '1115', pin_hash: hash, name: '橋本 遼', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 22, department_id: 1, station_id: 1, employee_number: '1116', pin_hash: hash, name: '石井 颯太', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+        // --- 2部 (16名) ---
+        { id: 23, department_id: 1, station_id: 1, employee_number: '1201', pin_hash: hash, name: '前田 修一', platoon: '2bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 0, is_rescue: 1, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 24, department_id: 1, station_id: 1, employee_number: '1202', pin_hash: hash, name: '藤田 圭介', platoon: '2bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 19.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 25, department_id: 1, station_id: 1, employee_number: '1203', pin_hash: hash, name: '後藤 正義', platoon: '2bu', rank: '消防士長', has_large_license: 1, is_paramedic: 0, is_rescue: 1, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 18.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 26, department_id: 1, station_id: 1, employee_number: '1204', pin_hash: hash, name: '長谷川 剛', platoon: '2bu', rank: '消防士長', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 17.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 27, department_id: 1, station_id: 1, employee_number: '1205', pin_hash: hash, name: '村上 貴文', platoon: '2bu', rank: '消防士長', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 16.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 28, department_id: 1, station_id: 1, employee_number: '1206', pin_hash: hash, name: '近藤 雅人', platoon: '2bu', rank: '消防副士長', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 15.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 29, department_id: 1, station_id: 1, employee_number: '1207', pin_hash: hash, name: '坂本 竜也', platoon: '2bu', rank: '消防副士長', has_large_license: 0, is_paramedic: 0, is_rescue: 1, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 14.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 30, department_id: 1, station_id: 1, employee_number: '1208', pin_hash: hash, name: '遠藤 瑛太', platoon: '2bu', rank: '消防副士長', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 13.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 31, department_id: 1, station_id: 1, employee_number: '1209', pin_hash: hash, name: '青木 裕介', platoon: '2bu', rank: '消防士', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 12.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 32, department_id: 1, station_id: 1, employee_number: '1210', pin_hash: hash, name: '藤井 陽介', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 11.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 33, department_id: 1, station_id: 1, employee_number: '1211', pin_hash: hash, name: '岡田 悠真', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 1, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 11.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 34, department_id: 1, station_id: 1, employee_number: '1212', pin_hash: hash, name: '原田 奏汰', platoon: '2bu', rank: '消防士', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 35, department_id: 1, station_id: 1, employee_number: '1213', pin_hash: hash, name: '中島 海斗', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 36, department_id: 1, station_id: 1, employee_number: '1214', pin_hash: hash, name: '小川 陸斗', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 37, department_id: 1, station_id: 1, employee_number: '1215', pin_hash: hash, name: '松田 凌', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 38, department_id: 1, station_id: 1, employee_number: '1216', pin_hash: hash, name: '上田 湊', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+
+        // ==========================================
+        // 山川開聞分遣所 (station_id: 2) — 18名
+        // 日勤者: 所長1名, 事務1名 = 2名
+        // 当務者: 1部8名 + 2部8名 = 16名
+        // ==========================================
+        // --- 日勤者 (2名) ---
+        { id: 39, department_id: 1, station_id: 2, employee_number: '2001', pin_hash: hash, name: '中村 護', platoon: 'nikkin', rank: '消防司令', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 1, role: 'admin', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 40, department_id: 1, station_id: 2, employee_number: '2002', pin_hash: hash, name: '山口 真理', platoon: 'nikkin', rank: '消防士長', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 1, role: 'staff', annual_leave_balance: 18.0, is_active: 1, created_at: new Date().toISOString() },
+        // --- 1部 (8名) ---
+        { id: 41, department_id: 1, station_id: 2, employee_number: '2101', pin_hash: hash, name: '加藤 恵介', platoon: '1bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 42, department_id: 1, station_id: 2, employee_number: '2102', pin_hash: hash, name: '吉田 大輔', platoon: '1bu', rank: '消防士長', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 18.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 43, department_id: 1, station_id: 2, employee_number: '2103', pin_hash: hash, name: '石川 洋平', platoon: '1bu', rank: '消防副士長', has_large_license: 1, is_paramedic: 0, is_rescue: 1, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 15.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 44, department_id: 1, station_id: 2, employee_number: '2104', pin_hash: hash, name: '前川 悠希', platoon: '1bu', rank: '消防副士長', has_large_license: 0, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 14.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 45, department_id: 1, station_id: 2, employee_number: '2105', pin_hash: hash, name: '野口 健太', platoon: '1bu', rank: '消防士', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 12.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 46, department_id: 1, station_id: 2, employee_number: '2106', pin_hash: hash, name: '田村 颯', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 11.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 47, department_id: 1, station_id: 2, employee_number: '2107', pin_hash: hash, name: '内田 蒼空', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 48, department_id: 1, station_id: 2, employee_number: '2108', pin_hash: hash, name: '宮崎 瑛斗', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+        // --- 2部 (8名) ---
+        { id: 49, department_id: 1, station_id: 2, employee_number: '2201', pin_hash: hash, name: '安藤 信吾', platoon: '2bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 50, department_id: 1, station_id: 2, employee_number: '2202', pin_hash: hash, name: '高田 勝也', platoon: '2bu', rank: '消防士長', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 17.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 51, department_id: 1, station_id: 2, employee_number: '2203', pin_hash: hash, name: '森田 紘一', platoon: '2bu', rank: '消防副士長', has_large_license: 1, is_paramedic: 0, is_rescue: 1, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 15.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 52, department_id: 1, station_id: 2, employee_number: '2204', pin_hash: hash, name: '福田 翔馬', platoon: '2bu', rank: '消防副士長', has_large_license: 0, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 14.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 53, department_id: 1, station_id: 2, employee_number: '2205', pin_hash: hash, name: '西田 涼介', platoon: '2bu', rank: '消防士', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 12.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 54, department_id: 1, station_id: 2, employee_number: '2206', pin_hash: hash, name: '三浦 蓮太', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 11.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 55, department_id: 1, station_id: 2, employee_number: '2207', pin_hash: hash, name: '川口 大翔', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 56, department_id: 1, station_id: 2, employee_number: '2208', pin_hash: hash, name: '久保 晴', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+
+        // ==========================================
+        // 頴娃分遣所 (station_id: 3) — 18名
+        // 日勤者: 所長1名, 事務1名 = 2名
+        // 当務者: 1部8名 + 2部8名 = 16名
+        // ==========================================
+        // --- 日勤者 (2名) ---
+        { id: 57, department_id: 1, station_id: 3, employee_number: '3001', pin_hash: hash, name: '佐々木 茂', platoon: 'nikkin', rank: '消防司令', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 1, role: 'admin', annual_leave_balance: 19.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 58, department_id: 1, station_id: 3, employee_number: '3002', pin_hash: hash, name: '山本 智子', platoon: 'nikkin', rank: '消防士長', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 1, role: 'staff', annual_leave_balance: 17.0, is_active: 1, created_at: new Date().toISOString() },
+        // --- 1部 (8名) ---
+        { id: 59, department_id: 1, station_id: 3, employee_number: '3101', pin_hash: hash, name: '松尾 和彦', platoon: '1bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 60, department_id: 1, station_id: 3, employee_number: '3102', pin_hash: hash, name: '山口 隆二', platoon: '1bu', rank: '消防士長', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 18.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 61, department_id: 1, station_id: 3, employee_number: '3103', pin_hash: hash, name: '大野 智也', platoon: '1bu', rank: '消防副士長', has_large_license: 1, is_paramedic: 0, is_rescue: 1, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 15.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 62, department_id: 1, station_id: 3, employee_number: '3104', pin_hash: hash, name: '岩崎 陽翔', platoon: '1bu', rank: '消防副士長', has_large_license: 0, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 14.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 63, department_id: 1, station_id: 3, employee_number: '3105', pin_hash: hash, name: '菅原 大河', platoon: '1bu', rank: '消防士', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 12.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 64, department_id: 1, station_id: 3, employee_number: '3106', pin_hash: hash, name: '桜井 結斗', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 11.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 65, department_id: 1, station_id: 3, employee_number: '3107', pin_hash: hash, name: '川上 朝陽', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 66, department_id: 1, station_id: 3, employee_number: '3108', pin_hash: hash, name: '永井 壮馬', platoon: '1bu', rank: '消防士', has_large_license: 0, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+        // --- 2部 (8名) ---
+        { id: 67, department_id: 1, station_id: 3, employee_number: '3201', pin_hash: hash, name: '水野 賢治', platoon: '2bu', rank: '消防司令補', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'chief', annual_leave_balance: 20.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 68, department_id: 1, station_id: 3, employee_number: '3202', pin_hash: hash, name: '今村 雄大', platoon: '2bu', rank: '消防士長', has_large_license: 1, is_paramedic: 0, is_rescue: 1, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 17.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 69, department_id: 1, station_id: 3, employee_number: '3203', pin_hash: hash, name: '堀田 京介', platoon: '2bu', rank: '消防副士長', has_large_license: 1, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 15.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 70, department_id: 1, station_id: 3, employee_number: '3204', pin_hash: hash, name: '平田 航平', platoon: '2bu', rank: '消防副士長', has_large_license: 0, is_paramedic: 0, is_rescue: 1, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 14.5, is_active: 1, created_at: new Date().toISOString() },
+        { id: 71, department_id: 1, station_id: 3, employee_number: '3205', pin_hash: hash, name: '新井 拓海', platoon: '2bu', rank: '消防士', has_large_license: 1, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 12.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 72, department_id: 1, station_id: 3, employee_number: '3206', pin_hash: hash, name: '古川 陽太', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 1, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 11.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 73, department_id: 1, station_id: 3, employee_number: '3207', pin_hash: hash, name: '吉村 琉生', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 1, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() },
+        { id: 74, department_id: 1, station_id: 3, employee_number: '3208', pin_hash: hash, name: '河野 隼人', platoon: '2bu', rank: '消防士', has_large_license: 0, is_paramedic: 0, is_rescue: 0, is_kikan: 0, is_day_worker: 0, role: 'staff', annual_leave_balance: 10.0, is_active: 1, created_at: new Date().toISOString() }
     ];
     dbData.staff.push(...staffList);
 }
@@ -115,7 +199,7 @@ class Statement {
         }
 
         // 3. ログイン処理用スタッフ検索 (employee_number & active)
-        if (sql.includes("FROM staff s") && sql.includes("s.employee_number = ? AND s.is_active = 1")) {
+        if (sql.includes("FROM staff s") && sql.includes("s.employee_number = ? AND s.is_active = 1") && !sql.includes("fd.code = ?")) {
             const empNum = params[0];
             const s = dbData.staff.find(x => x.employee_number === empNum && x.is_active === 1);
             if (!s) return undefined;
@@ -228,6 +312,15 @@ class Statement {
         // 14. IDによるスタッフ単体取得
         if (sql === "SELECT * FROM staff WHERE id = ?") {
             return dbData.staff.find(x => x.id === parseInt(params[0]));
+        }
+
+        // 14-2. 応援・補充職員の存在チェック
+        if (sql === "SELECT id FROM staff WHERE station_id = ? AND name = ? AND role = ?") {
+            const stationId = parseInt(params[0]);
+            const name = params[1];
+            const role = params[2];
+            const s = dbData.staff.find(x => x.station_id === stationId && x.name === name && x.role === role);
+            return s ? { id: s.id } : undefined;
         }
 
         // 15. 本部設定の取得
@@ -400,6 +493,84 @@ class Statement {
             });
             
             return joined;
+        }
+
+        // 職員データの取得 (station_id と is_active 指定)
+        if (sql === "SELECT * FROM staff WHERE station_id = ? AND is_active = 1") {
+            const stationId = parseInt(params[0]);
+            return dbData.staff.filter(x => x.station_id === stationId && x.is_active === 1);
+        }
+
+        // 職員の部・日勤情報取得 (確定時の部・日勤判定用)
+        if (sql === "SELECT id, platoon, is_day_worker FROM staff WHERE station_id = ?") {
+            const stationId = parseInt(params[0]);
+            return dbData.staff.filter(x => x.station_id === stationId).map(x => ({
+                id: x.id,
+                platoon: x.platoon,
+                is_day_worker: x.is_day_worker
+            }));
+        }
+
+        // 消防車両データの取得
+        if (sql.includes("FROM deployed_vehicles")) {
+            const stationId = parseInt(params[0]);
+            if (!dbData.deployed_vehicles) dbData.deployed_vehicles = [];
+            return dbData.deployed_vehicles.filter(x => x.station_id === stationId);
+        }
+
+        // 車両配置データの取得
+        if (sql.includes("FROM vehicle_assignments")) {
+            const stationId = parseInt(params[0]);
+            const startDate = params[1];
+            const endDate = params[2];
+            if (!dbData.vehicle_assignments) dbData.vehicle_assignments = [];
+            return dbData.vehicle_assignments.filter(x => 
+                x.station_id === stationId && x.work_date >= startDate && x.work_date <= endDate
+            );
+        }
+
+        // サイクル限定オーバーライド情報の取得
+        if (sql.includes("FROM schedule_staff_overrides")) {
+            const stationId = parseInt(params[0]);
+            const startDate = params[1];
+            if (!dbData.schedule_staff_overrides) dbData.schedule_staff_overrides = [];
+            return dbData.schedule_staff_overrides.filter(x => 
+                x.station_id === stationId && x.start_date === startDate
+            );
+        }
+
+        // スケジュールエントリーの取得
+        if (sql.includes("FROM schedule_entries")) {
+            if (!dbData.schedule_entries) dbData.schedule_entries = [];
+            
+            let start, end;
+            if (sql.includes("work_date BETWEEN ? AND ?")) {
+                if (params.length === 2) {
+                    start = params[0];
+                    end = params[1];
+                } else if (params.length === 3) {
+                    start = params[1];
+                    end = params[2];
+                }
+            }
+            
+            let result = dbData.schedule_entries;
+            if (start && end) {
+                result = result.filter(x => x.work_date >= start && x.work_date <= end);
+            }
+            
+            if (sql.includes("staff_id = ?")) {
+                const staffId = parseInt(params[0]);
+                result = result.filter(x => x.staff_id === staffId);
+            } else if (sql.includes("staff_id IN")) {
+                // e.g. "staff_id IN (1, 2, 3)" の簡易パース
+                const match = sql.match(/staff_id\s+IN\s*\(([^)]+)\)/i);
+                if (match) {
+                    const ids = match[1].split(',').map(x => parseInt(x.trim()));
+                    result = result.filter(x => ids.includes(x.staff_id));
+                }
+            }
+            return result;
         }
 
         console.warn('[DB MOCK UNHANDLED ALL] Returning empty array. SQL:', sql);
@@ -592,6 +763,33 @@ class Statement {
                 changes = 1;
             }
         }
+
+        // 10-2. 職員のアクティブ化
+        else if (sql === "UPDATE staff SET is_active = 1 WHERE id = ?") {
+            const staffId = parseInt(params[0]);
+            const s = dbData.staff.find(x => x.id === staffId);
+            if (s) {
+                s.is_active = 1;
+                changes = 1;
+            }
+        }
+        
+        // 10-3. 応援職員の非アクティブ化 (応援削除時)
+        else if (sql.includes("UPDATE staff") && sql.includes("SET is_active = 0") && sql.includes("role LIKE 'support:%'")) {
+            const stationId = parseInt(params[0]);
+            const match = sql.match(/id\s+NOT\s+IN\s*\(([^)]+)\)/i);
+            const excludedIds = match ? match[1].split(',').map(x => parseInt(x.trim())) : [];
+            let count = 0;
+            dbData.staff.forEach(s => {
+                if (s.station_id === stationId && s.role && s.role.startsWith('support:') && !excludedIds.includes(s.id)) {
+                    if (s.is_active !== 0) {
+                        s.is_active = 0;
+                        count++;
+                    }
+                }
+            });
+            changes = count;
+        }
         
         // 11. 消防本部設定の更新
         else if (sql === "UPDATE fire_departments SET name = ?, shift_system = ?, cycle_days = ? WHERE id = ?") {
@@ -624,6 +822,246 @@ class Statement {
                 });
             }
             changes = 1;
+        }
+
+        // 消防車両データの削除
+        else if (sql.includes("DELETE FROM deployed_vehicles")) {
+            const stationId = parseInt(params[0]);
+            if (!dbData.deployed_vehicles) dbData.deployed_vehicles = [];
+            const initialLen = dbData.deployed_vehicles.length;
+            dbData.deployed_vehicles = dbData.deployed_vehicles.filter(x => x.station_id !== stationId);
+            changes = initialLen - dbData.deployed_vehicles.length;
+        }
+
+        // 消防車両データのインサート
+        else if (sql.includes("INSERT INTO deployed_vehicles")) {
+            if (!dbData.deployed_vehicles) dbData.deployed_vehicles = [];
+            const id = dbData.deployed_vehicles.length + 1;
+            dbData.deployed_vehicles.push({
+                id,
+                station_id: parseInt(params[0]),
+                vehicle_name: params[1],
+                is_active: 1
+            });
+            lastInsertRowid = id;
+            changes = 1;
+        }
+
+        // 車両配置データの削除
+        else if (sql.includes("DELETE FROM vehicle_assignments")) {
+            const stationId = parseInt(params[0]);
+            const start = params[1];
+            const end = params[2];
+            if (!dbData.vehicle_assignments) dbData.vehicle_assignments = [];
+            const initialLen = dbData.vehicle_assignments.length;
+            dbData.vehicle_assignments = dbData.vehicle_assignments.filter(x => 
+                !(x.station_id === stationId && x.work_date >= start && x.work_date <= end)
+            );
+            changes = initialLen - dbData.vehicle_assignments.length;
+        }
+
+        // 車両配置データのインサート / 更新
+        else if (sql.includes("INSERT INTO vehicle_assignments") || sql.includes("REPLACE INTO vehicle_assignments")) {
+            if (!dbData.vehicle_assignments) dbData.vehicle_assignments = [];
+            const work_date = params[0];
+            const station_id = parseInt(params[1]);
+            const vehicle_name = params[2];
+            const role_name = params[3];
+            const staff_id = parseInt(params[4]);
+            
+            const idx = dbData.vehicle_assignments.findIndex(x => 
+                x.work_date === work_date && x.station_id === station_id && x.vehicle_name === vehicle_name && x.role_name === role_name
+            );
+            if (idx !== -1) {
+                dbData.vehicle_assignments[idx].staff_id = staff_id;
+            } else {
+                const id = dbData.vehicle_assignments.length + 1;
+                dbData.vehicle_assignments.push({
+                    id,
+                    work_date,
+                    station_id,
+                    vehicle_name,
+                    role_name,
+                    staff_id
+                });
+            }
+            changes = 1;
+        }
+        
+        // サイクル限定オーバーライド情報の保存
+        else if (sql.includes("INSERT INTO schedule_staff_overrides") || sql.includes("REPLACE INTO schedule_staff_overrides") || sql.includes("INSERT OR REPLACE INTO schedule_staff_overrides")) {
+            if (!dbData.schedule_staff_overrides) dbData.schedule_staff_overrides = [];
+            const cycle_number = parseInt(params[0]);
+            const start_date = params[1];
+            const station_id = parseInt(params[2]);
+            const staff_id = parseInt(params[3]);
+            const platoon = params[4];
+            const rank = params[5];
+            const has_large_license = parseInt(params[6] || 0);
+            const is_paramedic = parseInt(params[7] || 0);
+            const is_rescue = parseInt(params[8] || 0);
+            const is_kikan = parseInt(params[9] || 0);
+            const is_day_worker = parseInt(params[10] || 0);
+
+            const idx = dbData.schedule_staff_overrides.findIndex(x =>
+                x.cycle_number === cycle_number && x.start_date === start_date && x.staff_id === staff_id
+            );
+            const newObj = {
+                cycle_number,
+                start_date,
+                station_id,
+                staff_id,
+                platoon,
+                rank,
+                has_large_license,
+                is_paramedic,
+                is_rescue,
+                is_kikan,
+                is_day_worker
+            };
+            if (idx !== -1) {
+                dbData.schedule_staff_overrides[idx] = { ...dbData.schedule_staff_overrides[idx], ...newObj };
+            } else {
+                newObj.id = dbData.schedule_staff_overrides.length + 1;
+                dbData.schedule_staff_overrides.push(newObj);
+            }
+            changes = 1;
+        }
+        else if (sql.includes("DELETE FROM schedule_staff_overrides")) {
+            if (!dbData.schedule_staff_overrides) dbData.schedule_staff_overrides = [];
+            if (sql.includes("WHERE station_id = ? AND start_date = ? AND staff_id = ?")) {
+                const station_id = parseInt(params[0]);
+                const start_date = params[1];
+                const staff_id = parseInt(params[2]);
+                const initialLen = dbData.schedule_staff_overrides.length;
+                dbData.schedule_staff_overrides = dbData.schedule_staff_overrides.filter(x =>
+                    !(x.station_id === station_id && x.start_date === start_date && x.staff_id === staff_id)
+                );
+                changes = initialLen - dbData.schedule_staff_overrides.length;
+            } else if (sql.includes("WHERE station_id = ? AND start_date = ?")) {
+                const station_id = parseInt(params[0]);
+                const start_date = params[1];
+                const initialLen = dbData.schedule_staff_overrides.length;
+                dbData.schedule_staff_overrides = dbData.schedule_staff_overrides.filter(x =>
+                    !(x.station_id === station_id && x.start_date === start_date)
+                );
+                changes = initialLen - dbData.schedule_staff_overrides.length;
+            }
+        }
+
+        // スケジュール削除
+        else if (sql.includes("DELETE FROM schedule_entries")) {
+            if (!dbData.schedule_entries) dbData.schedule_entries = [];
+            if (sql.includes("WHERE staff_id = ? AND work_date = ?")) {
+                const staff_id = parseInt(params[0]);
+                const work_date = params[1];
+                const initialLen = dbData.schedule_entries.length;
+                dbData.schedule_entries = dbData.schedule_entries.filter(x => !(x.staff_id === staff_id && x.work_date === work_date));
+                changes = initialLen - dbData.schedule_entries.length;
+            } else if (sql.includes("WHERE cycle_number = ?")) {
+                const cycle = parseInt(params[0]);
+                const initialLen = dbData.schedule_entries.length;
+                dbData.schedule_entries = dbData.schedule_entries.filter(x => x.cycle_number !== cycle);
+                changes = initialLen - dbData.schedule_entries.length;
+            }
+        }
+
+        // 勤怠レコードの削除
+        else if (sql.includes("DELETE FROM attendance_records")) {
+            if (!dbData.attendance_records) dbData.attendance_records = [];
+            if (sql.includes("WHERE staff_id = ? AND work_date = ? AND status = 'absent'")) {
+                const staff_id = parseInt(params[0]);
+                const work_date = params[1];
+                const initialLen = dbData.attendance_records.length;
+                dbData.attendance_records = dbData.attendance_records.filter(x => 
+                    !(x.staff_id === staff_id && x.work_date === work_date && x.status === 'absent')
+                );
+                changes = initialLen - dbData.attendance_records.length;
+            }
+        }
+
+        // スケジュールインサート / 更新
+        else if (sql.includes("INSERT INTO schedule_entries") || sql.includes("REPLACE INTO schedule_entries")) {
+            if (!dbData.schedule_entries) dbData.schedule_entries = [];
+            
+            let staff_id, work_date, cycle_number, shift_key, start_time = null, end_time = null, is_confirmed = 0, confirmed_by = null, confirmed_at = null;
+            
+            if (sql.includes("start_time")) {
+                staff_id = parseInt(params[0]);
+                work_date = params[1];
+                cycle_number = parseInt(params[2]);
+                shift_key = params[3];
+                start_time = params[4] || null;
+                end_time = params[5] || null;
+                is_confirmed = parseInt(params[6] || 0);
+                confirmed_by = params[7] ? parseInt(params[7]) : null;
+                confirmed_at = params[8] || null;
+            } else {
+                staff_id = parseInt(params[0]);
+                work_date = params[1];
+                cycle_number = parseInt(params[2]);
+                shift_key = params[3];
+                is_confirmed = parseInt(params[4] || 0);
+                confirmed_by = params[5] ? parseInt(params[5]) : null;
+                confirmed_at = params[6] || null;
+            }
+            
+            const idx = dbData.schedule_entries.findIndex(x => 
+                x.staff_id === staff_id && x.work_date === work_date
+            );
+            if (idx !== -1) {
+                dbData.schedule_entries[idx].cycle_number = cycle_number;
+                dbData.schedule_entries[idx].shift_key = shift_key;
+                dbData.schedule_entries[idx].start_time = start_time;
+                dbData.schedule_entries[idx].end_time = end_time;
+                dbData.schedule_entries[idx].is_confirmed = is_confirmed;
+                dbData.schedule_entries[idx].confirmed_by = confirmed_by;
+                dbData.schedule_entries[idx].confirmed_at = confirmed_at;
+            } else {
+                const id = dbData.schedule_entries.length + 1;
+                dbData.schedule_entries.push({
+                    id,
+                    staff_id,
+                    work_date,
+                    cycle_number,
+                    shift_key,
+                    start_time,
+                    end_time,
+                    is_confirmed,
+                    confirmed_by,
+                    confirmed_at
+                });
+            }
+            changes = 1;
+        }
+
+        // スケジュール更新 (確定フラグ)
+        else if (sql.includes("UPDATE schedule_entries SET")) {
+            if (!dbData.schedule_entries) dbData.schedule_entries = [];
+            const is_confirmed = parseInt(params[0]);
+            const confirmed_by = params[1] ? parseInt(params[1]) : null;
+            const confirmed_at = params[2];
+            
+            if (sql.includes("WHERE staff_id = ? AND work_date = ?")) {
+                const staff_id = parseInt(params[3]);
+                const work_date = params[4];
+                const entry = dbData.schedule_entries.find(x => x.staff_id === staff_id && x.work_date === work_date);
+                if (entry) {
+                    entry.is_confirmed = is_confirmed;
+                    entry.confirmed_by = confirmed_by;
+                    entry.confirmed_at = confirmed_at;
+                    changes = 1;
+                }
+            } else if (sql.includes("WHERE cycle_number = ?")) {
+                const cycle = parseInt(params[3]);
+                const entries = dbData.schedule_entries.filter(x => x.cycle_number === cycle);
+                entries.forEach(x => {
+                    x.is_confirmed = is_confirmed;
+                    x.confirmed_by = confirmed_by;
+                    x.confirmed_at = confirmed_at;
+                });
+                changes = entries.length;
+            }
         }
 
         saveDatabase();

@@ -1,18 +1,24 @@
 /**
+ * 消防ポータルシステム 勤務スケジュール・自動作成モジュール (Schedule)
+ */
+const Schedule = (function() {
+
+/**
  * 隔日勤務（24時間2交代）勤務表アプリ コントローラー
  */
 
 // アプリケーション状態
 const state = {
-    userRole: null, // 'admin' or 'viewer' or null
+    userRole: null,
     startDate: null,
     activeCycle: 1,
     station: "指宿消防署",
+    stationId: 1,
     shifts: [],
     staffList: [],
-    hopeShifts: {}, // cycle_staffId -> dayIndex -> '休' or '当' or null
-    roster: {},      // cycle_staffId -> array of 28 shifts
-    hourlyLeaves: {}, // cycle_staffId_dayIndex -> { startTime, endTime, hours }
+    hopeShifts: {},
+    roster: {},
+    hourlyLeaves: {},
     warnings: [],
     activeTab: 'tab-list',
     activePlatoon: 1,
@@ -21,8 +27,9 @@ const state = {
     minSubOfficer: 1,
     minLarge: 1,
     minParamedic: 1,
-    vehicleAssignments: {}, // dateStr -> vehicleObj
-    deployedVehicles: [] // array of vehicleNames that are active
+    vehicleAssignments: {},
+    deployedVehicles: [],
+    isConfirmed: false
 };
 
 // ログイン・ログアウト処理
@@ -306,6 +313,14 @@ const DEFAULT_STAFF_PLATOON_2 = [
 // 曜日の日本語表記
 const WEEKDAYS_JP = ['日', '月', '火', '水', '木', '金', '土'];
 
+// 日付オブジェクトをローカルの YYYY-MM-DD 文字列に変換するヘルパー
+function formatDateLocal(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
 // 国民の祝日を判定する関数
 function getJapaneseHolidayWithoutSub(date) {
     const y = date.getFullYear();
@@ -431,35 +446,535 @@ function updateStationTitle() {
     }
 }
 
+
+// API経由での勤務データ読み込み
+async function loadDataFromAPI() {
+    try {
+        const url = `/api/schedule/roster?station_id=${state.stationId}&start_date=${state.startDate}`;
+        const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${Auth.token}` }
+        });
+        const data = await response.json();
+
+        if (!data.success) {
+            throw new Error(data.error || 'データのロードに失敗しました。');
+        }
+
+        // 職員リスト
+        state.staffList = data.staff;
+        state.deployedVehicles = data.deployedVehicles || [];
+        state.vehicleAssignments = data.vehicleAssignments || {};
+        
+        state.roster = {};
+        state.hopeShifts = {};
+        state.hourlyLeaves = {};
+        state.isConfirmed = false;
+
+        // 空データの初期化
+        state.staffList.forEach(s => {
+            state.roster[`${state.activeCycle}_${s.id}`] = new Array(28).fill('-');
+            state.hopeShifts[`${state.activeCycle}_${s.id}`] = {};
+        });
+
+        const start = new Date(state.startDate.replace(/-/g, '/'));
+
+        // DBから取得したスケジュールエントリーの割り当て
+        if (data.scheduleEntries && data.scheduleEntries.length > 0) {
+            data.scheduleEntries.forEach(entry => {
+                const staffId = entry.staff_id.toString();
+                const dateStr = entry.work_date;
+                const entryDate = new Date(dateStr.replace(/-/g, '/'));
+                
+                const diffTime = entryDate.getTime() - start.getTime();
+                const dayIdx = Math.round(diffTime / (1000 * 60 * 60 * 24));
+                
+                if (dayIdx >= 0 && dayIdx < 28) {
+                    const rosterKey = `${state.activeCycle}_${staffId}`;
+                    if (state.roster[rosterKey]) {
+                        state.roster[rosterKey][dayIdx] = entry.shift_key;
+                        
+                        if (entry.is_confirmed) {
+                            state.isConfirmed = true;
+                        }
+
+                        if (entry.start_time && entry.end_time) {
+                            const hourlyKey = `${state.activeCycle}_${staffId}_${dayIdx}`;
+                            const staffMember = state.staffList.find(x => x.id === staffId);
+                            const isDayWorker = staffMember ? !!staffMember.isDayWorker : false;
+                            state.hourlyLeaves[hourlyKey] = {
+                                startTime: entry.start_time,
+                                endTime: entry.end_time,
+                                hours: calculateHourlyLeaveHours(entry.start_time, entry.end_time, isDayWorker)
+                            };
+                        }
+                    }
+                }
+            });
+        } else {
+            // 初期データがない場合は当務・日勤を交互に仮生成
+            state.staffList.forEach(s => {
+                const schedule = new Array(28);
+                for (let d = 0; d < 28; d++) {
+                    if (s.platoon === 1) {
+                        schedule[d] = (d % 2 === 0) ? '当' : '明';
+                    } else if (s.platoon === 2) {
+                        schedule[d] = (d % 2 === 1) ? '当' : '明';
+                    } else {
+                        schedule[d] = '日';
+                    }
+                }
+                state.roster[`${state.activeCycle}_${s.id}`] = schedule;
+            });
+        }
+
+        // 稼働車両チェックボックスの同期
+        syncDeployedVehiclesCheckboxes();
+
+    } catch (err) {
+        console.error('Error loading schedule roster:', err);
+        Portal.showToast('勤務データの取得に失敗しました。', 'error');
+    }
+}
+
+// 下書き保存APIの呼び出し
+async function saveDraft() {
+    const currentRoster = {};
+    state.staffList.forEach(s => {
+        const k = `${state.activeCycle}_${s.id}`;
+        if (state.roster[k]) {
+            currentRoster[s.id] = state.roster[k];
+        }
+    });
+
+    const payload = {
+        station_id: state.stationId,
+        start_date: state.startDate,
+        cycle_number: state.activeCycle,
+        roster: currentRoster,
+        deployedVehicles: state.deployedVehicles,
+        vehicleAssignments: state.vehicleAssignments,
+        hourlyLeaves: state.hourlyLeaves
+    };
+
+    try {
+        const response = await fetch('/api/schedule/save', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${Auth.token}`
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+            Portal.showToast(data.message, 'success');
+        } else {
+            Portal.showToast(data.error, 'error');
+        }
+    } catch (err) {
+        console.error('Save error:', err);
+        Portal.showToast('通信エラーが発生しました。', 'error');
+    }
+}
+
+// 勤務表確定APIの呼び出し
+async function confirmSchedule() {
+    const confirmed = await showCustomConfirm('このサイクルの勤務表を確定しますか？\n確定すると、各職員の出退勤予定レコードが自動的に生成されます。');
+    if (!confirmed) return;
+
+    const currentRoster = {};
+    state.staffList.forEach(s => {
+        const k = `${state.activeCycle}_${s.id}`;
+        if (state.roster[k]) {
+            currentRoster[s.id] = state.roster[k];
+        }
+    });
+
+    const payload = {
+        station_id: state.stationId,
+        start_date: state.startDate,
+        cycle_number: state.activeCycle,
+        roster: currentRoster,
+        deployedVehicles: state.deployedVehicles,
+        vehicleAssignments: state.vehicleAssignments,
+        hourlyLeaves: state.hourlyLeaves
+    };
+
+    try {
+        const response = await fetch('/api/schedule/confirm', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${Auth.token}`
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+            Portal.showToast(data.message, 'success');
+            state.isConfirmed = true;
+            refreshUI();
+        } else {
+            Portal.showToast(data.error, 'error');
+        }
+    } catch (err) {
+        console.error('Confirm error:', err);
+        Portal.showToast('通信エラーが発生しました。', 'error');
+    }
+}
+
 // DOMの初期化と起動
-document.addEventListener('DOMContentLoaded', () => {
+
+async function render(container) {
+    this.container = container;
+    
+    // HTMLの構築 (ヘッダー等を除き、メインのコンテナと時間休モーダルのみを挿入)
+    container.innerHTML = `
+        <div class="scheduler-toolbar no-print" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding:12px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-md);">
+            <div style="font-weight:600; font-size:16px; display:flex; align-items:center; gap:8px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:20px; height:20px; color:var(--primary-color);">
+                    <path d="M19 4H5C3.89543 4 3 4.89543 3 6V20C3 21.1046 3.89543 22 5 22H19C20.1046 22 21 21.1046 21 20V6C21 4.89543 20.1046 4 19 4Z" stroke-linejoin="round"/>
+                    <path d="M16 2V6M8 2V6M3 10H21" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M8 14H12V18H8V14Z" fill="currentColor"/>
+                </svg>
+                勤務スケジュール管理 (隔日勤務 2交代)
+            </div>
+            <div style="display:flex; gap:12px;">
+                <button id="btn-save" class="btn btn-secondary admin-only" style="font-size:13px; padding:6px 16px;">下書き保存</button>
+                <button id="btn-confirm" class="btn btn-primary admin-only" style="font-size:13px; padding:6px 16px;">勤務表を確定</button>
+            </div>
+        </div>
+        
+        <main class="app-container" style="margin-top:0; padding:0; display:flex; gap:20px; width:100%;">
+            <!-- 設定パネル (サイドバー) -->
+            <aside class="settings-sidebar no-print" style="flex: 0 0 280px; width: 280px; display:flex; flex-direction:column; gap:16px;">
+                <section class="card settings-card" style="padding: 16px; display:flex; flex-direction:column; gap:12px; margin-bottom: 0;">
+                    <h2 style="font-size:14px; border-bottom:1px solid var(--border-color); padding-bottom:6px; margin-bottom:0;">1. 基本設定</h2>
+                    <div class="form-group">
+                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">所属署所</label>
+                        <input type="text" class="form-control" id="input-station" value="" disabled style="font-size:12px; padding:4px 8px; height:28px; background:rgba(255,255,255,0.03);">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">起算日 (開始日)</label>
+                        <input type="date" class="form-control" id="input-start-date" style="font-size:12px; padding:4px 8px; height:28px;">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">表示サイクル</label>
+                        <select class="form-control" id="select-cycle" style="font-size:12px; padding:2px 8px; height:28px;">
+                            ${[...Array(13)].map((_, i) => `<option value="${i+1}">第 ${i+1} サイクル</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group admin-only">
+                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">小隊定員数</label>
+                        <input type="number" class="form-control" id="input-platoon-size" min="1" max="40" style="font-size:12px; padding:4px 8px; height:28px;">
+                    </div>
+                    <div class="form-group admin-only">
+                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">最低確保人員数</label>
+                        <input type="number" class="form-control" id="input-min-staffing" min="1" max="40" style="font-size:12px; padding:4px 8px; height:28px;">
+                    </div>
+                    <div class="form-group admin-only">
+                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">最低確保 司令・補数</label>
+                        <input type="number" class="form-control" id="input-min-subofficer" min="0" max="10" style="font-size:12px; padding:4px 8px; height:28px;">
+                    </div>
+                    <div class="form-group admin-only">
+                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">最低確保 大型免許数</label>
+                        <input type="number" class="form-control" id="input-min-large" min="0" max="10" style="font-size:12px; padding:4px 8px; height:28px;">
+                    </div>
+                    <div class="form-group admin-only">
+                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">最低確保 救命士数</label>
+                        <input type="number" class="form-control" id="input-min-paramedic" min="0" max="10" style="font-size:12px; padding:4px 8px; height:28px;">
+                    </div>
+                    <div class="form-group admin-only" style="display: flex; align-items: center; gap: 8px; margin-top:4px; margin-bottom:0;">
+                        <input type="checkbox" id="chk-auto-leave" style="width: 16px; height: 16px; cursor: pointer;">
+                        <label class="form-label" for="chk-auto-leave" style="margin-bottom: 0; cursor: pointer; font-size:11px;">余剰日に年休を自動挿入</label>
+                    </div>
+                </section>
+
+                <section class="card settings-card admin-only" style="padding: 16px; display:flex; flex-direction:column; gap:12px; margin-bottom:0;">
+                    <h2 style="font-size:14px; border-bottom:1px solid var(--border-color); padding-bottom:6px; margin-bottom:0;">2. メンバー定員管理</h2>
+                    <div class="platoon-selector" style="display:flex; gap:6px;">
+                        <button id="btn-platoon-1" class="platoon-tab-btn btn-platoon active" data-platoon="1" style="flex:1; font-size:12px; padding:4px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-app); cursor:pointer;">A日 (1部)</button>
+                        <button id="btn-platoon-2" class="platoon-tab-btn btn-platoon" data-platoon="2" style="flex:1; font-size:12px; padding:4px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-app); cursor:pointer;">B日 (2部)</button>
+                    </div>
+                    <div id="platoon-1-members" class="platoon-members-inputs" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; padding:2px;">
+                        <!-- 動的生成 -->
+                    </div>
+                    <div id="platoon-2-members" class="platoon-members-inputs" style="display: none; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; padding:2px;">
+                        <!-- 動的生成 -->
+                    </div>
+                </section>
+
+                <div class="action-buttons" style="display:flex; flex-direction:column; gap:10px;">
+                    <button id="btn-generate" class="btn btn-primary btn-block admin-only" style="font-size:13px; padding:8px 12px; display:flex; justify-content:center; align-items:center; gap:8px;">
+                        <span class="btn-text">勤務表を自動生成</span>
+                        <span class="spinner" style="display: none; width:14px; height:14px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 1s infinite linear;"></span>
+                    </button>
+                    <button id="btn-csv" class="btn btn-secondary btn-block" style="font-size:13px; padding:8px 12px;">CSVエクスポート</button>
+                    <button id="btn-print" class="btn btn-secondary btn-block" style="font-size:13px; padding:8px 12px;">印刷プレビュー</button>
+                </div>
+            </aside>
+
+            <!-- メイン表示領域 -->
+            <div class="content-area" style="flex:1; display:flex; flex-direction:column; gap:16px; overflow-x:auto;">
+                <div id="alert-container" class="alert-container no-print" style="display: none; border-radius:var(--radius-md); margin-bottom:0;">
+                    <div class="alert-header">
+                        <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        <h3>勤務ルールの警告があります</h3>
+                    </div>
+                    <ul id="alert-list" class="alert-list"></ul>
+                </div>
+
+                <div class="view-tabs no-print" style="margin-bottom:0; display:flex; border-bottom:1px solid var(--border-color); padding-bottom:2px;">
+                    <button class="view-tab-btn active" data-tab="tab-list">勤務一覧（編集・統計）</button>
+                    <button class="view-tab-btn" data-tab="tab-calendar">カレンダー表示</button>
+                    <button class="view-tab-btn admin-only" data-tab="tab-hope">事前指定（希望シフト）</button>
+                    <button class="view-tab-btn admin-only" data-tab="tab-support">補充勤務</button>
+                    <button class="view-tab-btn" data-tab="tab-vehicle">車両配置</button>
+                </div>
+
+                <!-- タブ1: 勤務一覧表 -->
+                <section id="tab-list" class="tab-content card active-tab" style="margin-bottom:0;">
+                    <div class="tab-header">
+                        <h2>勤務一覧（スプレッドシート型）</h2>
+                        <p class="tab-description no-print">セルをクリックするとシフトを手動で変更できます。右端に各スタッフの勤務統計が表示されます。</p>
+                    </div>
+                    <div id="roster-tables-container" style="overflow-x:auto;"></div>
+                    <div id="roster-legend" class="legend no-print" style="margin-top:16px;"></div>
+                </section>
+
+                <!-- タブ2: カレンダー表示 -->
+                <section id="tab-calendar" class="tab-content card" style="margin-bottom:0;">
+                    <div class="tab-header">
+                        <h2>カレンダー表示</h2>
+                        <p class="tab-description">28日サイクルのカレンダー表示です。</p>
+                    </div>
+                    <div id="calendar-view-container" style="overflow-x:auto;">
+                        <div id="calendar-grid-container" class="calendar-layout"></div>
+                    </div>
+                </section>
+
+                <!-- タブ3: 希望シフト -->
+                <section id="tab-hope" class="tab-content card" style="margin-bottom:0;">
+                    <div class="tab-header">
+                        <h2>事前指定（希望シフト）</h2>
+                        <p class="tab-description">自動生成前に優先させたい休みや勤務を指定します。</p>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+                        <button id="btn-clear-hope" class="btn btn-secondary" style="font-size:12px; padding:6px 12px;">希望指定を全クリア</button>
+                    </div>
+                    <div id="hope-tables-container" style="overflow-x:auto;"></div>
+                </section>
+
+                <!-- タブ4: 補充勤務 -->
+                <section id="tab-support" class="tab-content card" style="margin-bottom:0;">
+                    <div class="tab-header">
+                        <h2>補充勤務管理</h2>
+                        <p class="tab-description">他署からの応援職員や、交代制ではない日勤者を追加して勤務表に反映させます。</p>
+                    </div>
+                    <div class="support-layout" style="display:grid; grid-template-columns: 1fr 2.5fr; gap:20px;">
+                        <div class="card-sub" style="padding: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                            <h3 style="font-size:14px; margin-bottom:12px;">応援職員の追加登録</h3>
+                            <form id="form-add-support" style="display:flex; flex-direction:column; gap:12px;">
+                                <div class="form-group">
+                                    <label class="form-label" style="font-size:11px; margin-bottom:4px;">応援元所属</label>
+                                    <input type="text" class="form-control" id="support-origin" placeholder="例: 頴娃分遣所" required style="font-size:12px; padding:4px 8px; height:28px;">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" style="font-size:11px; margin-bottom:4px;">氏名</label>
+                                    <input type="text" class="form-control" id="support-name" placeholder="例: 指宿 応太" required style="font-size:12px; padding:4px 8px; height:28px;">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" style="font-size:11px; margin-bottom:4px;">所属小隊</label>
+                                    <select class="form-control" id="support-platoon" style="font-size:12px; padding:2px 8px; height:28px;">
+                                        <option value="1">第1小隊</option>
+                                        <option value="2">第2小隊</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" style="font-size:11px; margin-bottom:4px;">階級</label>
+                                    <select class="form-control" id="support-rank" style="font-size:12px; padding:2px 8px; height:28px;">
+                                        <option value="消防士">消防士</option>
+                                        <option value="消防副士長">消防副士長</option>
+                                        <option value="消防士長">消防士長</option>
+                                        <option value="消防司令補">消防司令補</option>
+                                        <option value="消防司令">消防司令</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" style="font-size:11px; margin-bottom:4px;">資格設定</label>
+                                    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                                        <label style="display:flex; align-items:center; gap:4px; font-size:11px; cursor:pointer;"><input type="checkbox" id="support-large"> 大型</label>
+                                        <label style="display:flex; align-items:center; gap:4px; font-size:11px; cursor:pointer;"><input type="checkbox" id="support-paramedic"> 救命士</label>
+                                        <label style="display:flex; align-items:center; gap:4px; font-size:11px; cursor:pointer;"><input type="checkbox" id="support-rescue"> 救助</label>
+                                        <label style="display:flex; align-items:center; gap:4px; font-size:11px; cursor:pointer;"><input type="checkbox" id="support-kikan"> 機関員</label>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:8px;">
+                                    <div class="form-group" style="flex:1;">
+                                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">応援開始日</label>
+                                        <input type="date" class="form-control" id="support-start" required style="font-size:12px; padding:4px 8px; height:28px;">
+                                    </div>
+                                    <div class="form-group" style="flex:1;">
+                                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">応援終了日</label>
+                                        <input type="date" class="form-control" id="support-end" required style="font-size:12px; padding:4px 8px; height:28px;">
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-primary" style="margin-top:8px; font-size:12px; padding:6px;">登録</button>
+                              </form>
+                        </div>
+                        <div class="card-sub" style="padding: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                            <h3 style="font-size:14px; margin-bottom:12px;">現在登録中の応援・補充リスト</h3>
+                            <div class="table-responsive" style="overflow-x:auto;">
+                                <table class="table" style="font-size:12px; width:100%; border-collapse:collapse;">
+                                    <thead>
+                                        <tr style="border-bottom:2px solid var(--border-color);">
+                                            <th style="padding:8px; text-align:left;">元所属</th>
+                                            <th style="padding:8px; text-align:left;">氏名</th>
+                                            <th style="padding:8px; text-align:left;">補充先</th>
+                                            <th style="padding:8px; text-align:left;">階級</th>
+                                            <th style="padding:8px; text-align:left;">資格</th>
+                                            <th style="padding:8px; text-align:left;">期間</th>
+                                            <th style="padding:8px; text-align:center;">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="support-list-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- タブ5: 車両配置 -->
+                <section id="tab-vehicle" class="tab-content card" style="margin-bottom:0;">
+                    <div class="tab-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 16px; flex-wrap:wrap; gap:12px;">
+                        <div>
+                            <h2>車両配置設定</h2>
+                            <p class="tab-description" style="margin-bottom: 0;">日付ごとの各運用車両への乗車割り当てを行います。</p>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap:wrap;">
+                            <label class="form-label" style="margin-bottom: 0; font-size: 13px; font-weight: 600;">日付選択:</label>
+                            <button id="btn-vehicle-prev-day" class="btn btn-secondary" style="padding: 4px 12px; font-size: 13px; height: 32px; cursor:pointer;">&lt; 前日</button>
+                            <input type="date" class="form-control" id="vehicle-date-select" style="width: auto; padding: 4px 12px; height: 32px; font-size: 13px;">
+                            <button id="btn-vehicle-next-day" class="btn btn-secondary" style="padding: 4px 12px; font-size: 13px; height: 32px; cursor:pointer;">翌日 &gt;</button>
+                            <button id="btn-vehicle-copy-prev" class="btn btn-secondary admin-only" style="padding: 4px 12px; font-size: 13px; height: 32px; cursor:pointer;">前日の配置をコピー</button>
+                            <button id="btn-vehicle-suggest" class="btn btn-secondary admin-only" style="padding: 4px 12px; font-size: 13px; height: 32px; background-color: var(--primary-light); color: var(--primary-color); border-color: var(--primary-color); cursor:pointer;">自動配置提案</button>
+                            <button id="btn-vehicle-clear" class="btn btn-secondary admin-only" style="padding: 4px 12px; font-size: 13px; height: 32px; color: var(--color-wday-sun); border-color: rgba(220, 38, 38, 0.2); background-color: rgba(220, 38, 38, 0.02); cursor:pointer;">配置初期化</button>
+                        </div>
+                    </div>
+
+                    <div class="vehicle-view-layout" style="display: grid; grid-template-columns: 1.2fr 2fr; gap: 20px;">
+                        <div class="card-sub" style="padding: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                            <h3 style="font-size: 14px; margin-bottom: 12px;">1. 運用車両の選択</h3>
+                            <div class="vehicle-checkboxes" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 12px;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;"><input type="checkbox" id="chk-vehicle-shiki" checked> 指揮車</label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;"><input type="checkbox" id="chk-vehicle-tank" checked> タンク車</label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;"><input type="checkbox" id="chk-vehicle-kyukyu1" checked> 救急車1</label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;"><input type="checkbox" id="chk-vehicle-kyukyu2" checked> 救急車2</label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;"><input type="checkbox" id="chk-vehicle-kyujo" checked> 救助工作車</label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;"><input type="checkbox" id="chk-vehicle-hashigo" checked> はしご車</label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;"><input type="checkbox" id="chk-vehicle-kyoten" checked> 拠点機能車</label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;"><input type="checkbox" id="chk-vehicle-yobi" checked> 予備車</label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;"><input type="checkbox" id="chk-vehicle-tsushin" checked> 卓上通信</label>
+                            </div>
+
+                            <h3 style="font-size: 14px; margin-top: 20px; margin-bottom: 12px;">2. 本日の出勤メンバー (<span id="vehicle-duty-count">0</span>名)</h3>
+                            <div id="vehicle-duty-staff-list" class="duty-staff-list-box" style="max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px;"></div>
+                        </div>
+
+                        <div class="card-sub" style="padding: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                            <h3 style="font-size: 14px; margin-bottom: 12px;">3. 乗車割り当て</h3>
+                            <div id="vehicle-slots-wrapper" class="vehicle-slots-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;"></div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    `;
+
+    // 既存の時間休モーダルがあれば削除して再追加
+    document.getElementById('shift-modal')?.remove();
+    const modalDiv = document.createElement('div');
+    modalDiv.innerHTML = `
+        <div id="shift-modal" class="modal no-print" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 10000;">
+            <div class="modal-content" style="background: var(--bg-card); padding: 24px; border-radius: var(--radius-lg); border: 1px solid var(--border-color); max-width: 380px; width: 100%; text-align: center; box-shadow: var(--shadow-lg);">
+                <h4 id="modal-title" style="margin-top: 0; margin-bottom: 16px; font-size: 16px; font-weight: 600;">シフト変更</h4>
+                
+                <div class="modal-range-selector" style="display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 12px;">
+                    <span>適用期間:</span>
+                    <span id="modal-start-day-label" style="font-weight: 600;">-</span>日目
+                    <span>〜</span>
+                    <input type="number" id="modal-end-day-input" class="form-control" min="1" max="28" style="width: 65px; padding: 4px 8px; height: 26px; font-size: 12px;" placeholder="当日">日目
+                </div>
+
+                <div id="modal-shift-buttons" class="modal-buttons" style="margin-bottom: 12px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+                    <!-- 動的生成 -->
+                </div>
+                
+                <div id="modal-hourly-config" style="display: none; border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 12px; margin-bottom: 16px; font-size: 12px; text-align: left;">
+                    <label style="display: flex; align-items: center; gap: 6px; font-weight: 600; margin-bottom: 8px; cursor: pointer;">
+                        <input type="checkbox" id="check-hourly-leave"> 時間休を指定する
+                    </label>
+                    <div id="hourly-leave-inputs" style="display: none; flex-direction: column; gap: 8px; padding-left: 18px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span>開始:</span>
+                            <input type="time" id="modal-hourly-start" value="08:30" class="form-control" style="width: auto; padding: 4px 8px; height: 26px; font-size: 12px;">
+                            <span>終了:</span>
+                            <input type="time" id="modal-hourly-end" value="17:15" class="form-control" style="width: auto; padding: 4px 8px; height: 26px; font-size: 12px;">
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                            実休止時間: <span id="label-hourly-hours" style="font-weight: bold; color: #dc2626;">0</span> 時間 
+                            (年休消化: <span id="label-hourly-days" style="font-weight: bold; color: #dc2626;">0.00</span> 日)
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-buttons" style="display: flex; flex-direction: column; gap: 8px;">
+                    <button id="btn-modal-save" class="btn btn-primary" style="width: 100%; padding: 8px; font-size:13px;">保存</button>
+                    <button id="btn-modal-clear" class="btn btn-modal" style="background-color: var(--secondary-bg); color: var(--color-wday-sun); border-color: var(--border-color); display: none; width: 100%; padding: 8px; font-size:13px;"><span class="badge" style="background-color: transparent; color: var(--color-wday-sun);">×</span> 指定を解除 (クリア)</button>
+                    <button id="btn-modal-cancel" class="btn btn-secondary" style="width: 100%; padding: 8px; font-size:13px;">キャンセル</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modalDiv.firstElementChild);
+
+    // 設定初期化
     initSettings();
-    initTheme();
-    bindEvents();
     
-    // 初期表示として自動的に今日の日付を設定して描画
+    // Authからユーザー情報を反映
+    state.station = Auth.user.station_name;
+    state.stationId = Auth.user.station_id;
+    state.userRole = Auth.hasRole('chief', 'admin', 'sysadmin') ? 'admin' : 'viewer';
+
+    // 起算日の初期値（今日の日付）
     const today = new Date();
-    document.getElementById('input-start-date').value = today.toISOString().split('T')[0];
-    handleDateChange();
-    
-    // 署所名のデフォルト表示
+    state.startDate = formatDateLocal(today);
+    document.getElementById('input-start-date').value = state.startDate;
     document.getElementById('input-station').value = state.station;
-    updateStationTitle();
-    applyStationVehiclePreset(state.station);
-    
-    // 初期スタッフリストを設定して描画
-    loadDefaultStaff();
-    renderStaffInputs();
-    
-    // 初期の空カレンダー/テーブルを描画
-    generateEmptyRoster();
-    
-    // 勤務シフト設定の初期描画
-    renderShiftConfigList();
-    renderLegend();
-    
+
+    // APIからデータロード
+    await loadDataFromAPI();
+
+    // イベントバインディング
+    bindEvents();
+    bindVehicleEvents();
+    bindVehicleCheckboxEvents();
+
+    // 閲覧モードの場合は入力欄などを無効化
+    if (state.userRole !== 'admin') {
+        document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
+        const setElDisabled = (id) => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = true;
+        };
+        setElDisabled('input-start-date');
+        setElDisabled('select-cycle');
+        setElDisabled('chk-auto-leave');
+    }
+
+    // 初回描画
     refreshUI();
-});
+}
 
 // テーマ（ライト/ダーク）の初期化
 function initTheme() {
@@ -471,6 +986,7 @@ function initTheme() {
 function updateThemeIcon(theme) {
     const sunIcon = document.querySelector('#btn-theme-toggle .sun-icon');
     const moonIcon = document.querySelector('#btn-theme-toggle .moon-icon');
+    if (!sunIcon || !moonIcon) return;
     if (theme === 'dark') {
         sunIcon.style.display = 'none';
         moonIcon.style.display = 'block';
@@ -482,7 +998,7 @@ function updateThemeIcon(theme) {
 
 // 設定の初期化
 function initSettings() {
-    state.startDate = new Date();
+    state.startDate = formatDateLocal(new Date());
     state.station = "指宿消防署";
     state.shifts = [
         { key: "当", name: "勤務", char: "当", color: "#e0f2fe", textColor: "#0369a1", isSystem: true },
@@ -758,16 +1274,15 @@ function renderStaffInputs() {
         const row = document.createElement('div');
         row.className = 'staff-input-row';
         
-        // 1. 名前入力
+        // 1. 名前入力 (職員管理から一元設定されるため読取専用)
         const inputName = document.createElement('input');
         inputName.type = 'text';
         inputName.className = 'form-control';
         inputName.value = staff.name;
         inputName.placeholder = "名前";
-        inputName.addEventListener('change', (e) => {
-            staff.name = e.target.value.trim() || `小隊員 ${staff.id}`;
-            refreshUI();
-        });
+        inputName.disabled = true;
+        inputName.style.background = 'rgba(255,255,255,0.03)';
+        inputName.style.cursor = 'default';
         row.appendChild(inputName);
         
         // 2. 階級選択
@@ -866,11 +1381,11 @@ function handleDateChange() {
     const val = document.getElementById('input-start-date').value;
     if (!val) return;
     
-    state.startDate = new Date(val);
+    state.startDate = val;
     
     // アクティブなサイクルの開始日と終了日を計算
     const activeStartDate = new Date(state.startDate);
-    activeStartDate.setDate(state.startDate.getDate() + (state.activeCycle - 1) * 28);
+    activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
     
     const activeEndDate = new Date(activeStartDate);
     activeEndDate.setDate(activeStartDate.getDate() + 27);
@@ -924,74 +1439,88 @@ function updateGenerateButtonText() {
 // イベントリスナーの紐付け
 function bindEvents() {
     // 署所名変更
-    document.getElementById('input-station').addEventListener('change', (e) => {
-        const stationName = e.target.value.trim() || "指宿消防署";
-        state.station = stationName;
-        updateStationTitle();
-        applyStationVehiclePreset(stationName);
-        
-        // ユーザー指定のダミーデータ自動切替
-        if (stationName === "指宿消防署") {
-            state.platoonSize = 19;
-            document.getElementById('input-platoon-size').value = 19;
-            loadDefaultStaff();
-            renderStaffInputs();
-            generateEmptyRoster();
-            refreshUI();
-        } else if (stationName === "山川開聞分遣所" || stationName === "頴娃分遣所") {
-            state.platoonSize = 9;
-            document.getElementById('input-platoon-size').value = 9;
-            loadDefaultStaff();
-            renderStaffInputs();
-            generateEmptyRoster();
-            refreshUI();
-        }
-    });
+    const elInputStation = document.getElementById('input-station');
+    if (elInputStation) {
+        elInputStation.addEventListener('change', (e) => {
+            const stationName = e.target.value.trim() || "指宿消防署";
+            state.station = stationName;
+            updateStationTitle();
+            applyStationVehiclePreset(stationName);
+            
+            // ユーザー指定のダミーデータ自動切替
+            if (stationName === "指宿消防署") {
+                state.platoonSize = 19;
+                const elInputPlatoonSize = document.getElementById('input-platoon-size');
+                if (elInputPlatoonSize) elInputPlatoonSize.value = 19;
+                loadDefaultStaff();
+                renderStaffInputs();
+                generateEmptyRoster();
+                refreshUI();
+            } else if (stationName === "山川開聞分遣所" || stationName === "頴娃分遣所") {
+                state.platoonSize = 9;
+                const elInputPlatoonSize = document.getElementById('input-platoon-size');
+                if (elInputPlatoonSize) elInputPlatoonSize.value = 9;
+                loadDefaultStaff();
+                renderStaffInputs();
+                generateEmptyRoster();
+                refreshUI();
+            }
+        });
+    }
 
     // 新規シフト追加
-    document.getElementById('btn-add-shift').addEventListener('click', async () => {
-        const char = await showCustomPrompt("追加するシフトの記号（1文字）を入力してください：\n（例：公、特、病、など）");
-        if (!char) return;
-        const trimmedChar = char.trim().slice(0, 1);
-        if (trimmedChar.length === 0) return;
-        
-        // 重複チェック
-        if (state.shifts.some(s => s.key === trimmedChar || s.char === trimmedChar)) {
-            await showCustomAlert("既に存在するシフト記号です。別の文字を指定してください。");
-            return;
-        }
-        
-        const name = await showCustomPrompt(`シフト「${trimmedChar}」の正式名称（説明）を入力してください：\n（例：公休、特別休暇、など）`);
-        if (!name) return;
-        const trimmedName = name.trim();
-        
-        // ランダムな配色
-        const randomColor = "#" + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
-        
-        state.shifts.push({
-            key: trimmedChar,
-            name: trimmedName,
-            char: trimmedChar,
-            color: randomColor,
-            textColor: "#ffffff"
+    const elBtnAddShift = document.getElementById('btn-add-shift');
+    if (elBtnAddShift) {
+        elBtnAddShift.addEventListener('click', async () => {
+            const char = await showCustomPrompt("追加するシフトの記号（1文字）を入力してください：\n（例：公、特、病、など）");
+            if (!char) return;
+            const trimmedChar = char.trim().slice(0, 1);
+            if (trimmedChar.length === 0) return;
+            
+            // 重複チェック
+            if (state.shifts.some(s => s.key === trimmedChar || s.char === trimmedChar)) {
+                await showCustomAlert("既に存在するシフト記号です。別の文字を指定してください。");
+                return;
+            }
+            
+            const name = await showCustomPrompt(`シフト「${trimmedChar}」の正式名称（説明）を入力してください：\n（例：公休、特別休暇、など）`);
+            if (!name) return;
+            const trimmedName = name.trim();
+            
+            // ランダムな配色
+            const randomColor = "#" + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+            
+            state.shifts.push({
+                key: trimmedChar,
+                name: trimmedName,
+                char: trimmedChar,
+                color: randomColor,
+                textColor: "#ffffff"
+            });
+            
+            renderShiftConfigList();
+            renderLegend();
+            refreshUI();
         });
-        
-        renderShiftConfigList();
-        renderLegend();
-        refreshUI();
-    });
+    }
 
     // テーマ切り替え
-    document.getElementById('btn-theme-toggle').addEventListener('click', () => {
-        const currentTheme = document.documentElement.getAttribute('data-theme');
-        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', newTheme);
-        localStorage.setItem('theme', newTheme);
-        updateThemeIcon(newTheme);
-    });
+    const elBtnThemeToggle = document.getElementById('btn-theme-toggle');
+    if (elBtnThemeToggle) {
+        elBtnThemeToggle.addEventListener('click', () => {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateThemeIcon(newTheme);
+        });
+    }
     
     // 起算日変更
-    document.getElementById('input-start-date').addEventListener('change', handleDateChange);
+    const elInputStartDate = document.getElementById('input-start-date');
+    if (elInputStartDate) {
+        elInputStartDate.addEventListener('change', handleDateChange);
+    }
 
     // 小隊人数の変更
     document.getElementById('input-platoon-size').addEventListener('change', (e) => {
@@ -1094,7 +1623,7 @@ function bindEvents() {
     });
 
     // 応援職員の登録フォーム送信
-    const formSupport = document.getElementById('form-support-staff');
+    const formSupport = document.getElementById('form-add-support');
     if (formSupport) {
         formSupport.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -1151,7 +1680,7 @@ function bindEvents() {
                 // シフトの初期化
                 const schedule = new Array(28);
                 const cycleStart = new Date(state.startDate);
-                cycleStart.setDate(state.startDate.getDate() + (c - 1) * 28);
+                cycleStart.setDate(cycleStart.getDate() + (c - 1) * 28);
                 
                 for (let d = 0; d < 28; d++) {
                     const dayDate = new Date(cycleStart);
@@ -1247,7 +1776,7 @@ function bindEvents() {
                 });
 
                 const activeStartDate = new Date(state.startDate);
-                activeStartDate.setDate(state.startDate.getDate() + (state.activeCycle - 1) * 28);
+                activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
 
                 // 前サイクル末尾からの連続勤務ブロック数を計算し、staffListのコピーに付与する
                 const staffListWithPrev = state.staffList.map(s => {
@@ -1315,7 +1844,7 @@ function bindEvents() {
     document.getElementById('btn-csv').addEventListener('click', async () => {
         try {
             const activeStartDate = new Date(state.startDate);
-            activeStartDate.setDate(state.startDate.getDate() + (state.activeCycle - 1) * 28);
+            activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
 
             // アクティブサイクルの roster を抽出
             const activeRoster = {};
@@ -1377,240 +1906,262 @@ function bindEvents() {
     });
 
     // 設定読込 (全サイクル読込、古いフォーマットとの互換性マッピング付き)
-    document.getElementById('btn-load').addEventListener('click', () => {
-        document.getElementById('file-loader').click();
-    });
+    const elBtnLoad = document.getElementById('btn-load');
+    if (elBtnLoad) {
+        elBtnLoad.addEventListener('click', () => {
+            const elFileLoader = document.getElementById('file-loader');
+            if (elFileLoader) elFileLoader.click();
+        });
+    }
     
-    document.getElementById('file-loader').addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        
-        const reader = new FileReader();
-        reader.onload = async function(evt) {
-            try {
-                const data = JSON.parse(evt.target.result);
-                if (data.startDate) {
-                    document.getElementById('input-start-date').value = data.startDate;
-                    state.startDate = new Date(data.startDate);
-                }
-                if (data.activeCycle) {
-                    state.activeCycle = data.activeCycle;
-                    document.getElementById('select-cycle').value = data.activeCycle;
-                } else {
-                    state.activeCycle = 1;
-                    document.getElementById('select-cycle').value = 1;
-                }
-                if (data.station) {
-                    state.station = data.station;
-                } else {
-                    state.station = "本署";
-                }
-                document.getElementById('input-station').value = state.station;
-                updateStationTitle();
-
-                if (data.shifts) {
-                    state.shifts = data.shifts;
-                } else {
-                    state.shifts = [
-                        { key: "当", name: "勤務", char: "当", color: "#e0f2fe", textColor: "#0369a1", isSystem: true },
-                        { key: "明", name: "非番", char: "非", color: "#f3f4f6", textColor: "#4b5563", isSystem: true },
-                        { key: "休", name: "週休", char: "休", color: "#fef3c7", textColor: "#d97706", isSystem: true },
-                        { key: "有", name: "年休", char: "年", color: "#dcfce7", textColor: "#15803d" },
-                        { key: "公", name: "公休", char: "公", color: "#f3e8ff", textColor: "#6b21a8" },
-                        { key: "張", name: "出張", char: "張", color: "#e2f0fd", textColor: "#2563eb" },
-                        { key: "特", name: "特休", char: "特", color: "#fee2e2", textColor: "#dc2626" },
-                        { key: "病", name: "病休", char: "病", color: "#ffedd5", textColor: "#ea580c" }
-                    ];
-                }
-                renderShiftConfigList();
-                renderLegend();
-
-                if (data.platoonSize) {
-                    state.platoonSize = data.platoonSize;
-                    document.getElementById('input-platoon-size').value = data.platoonSize;
-                }
-                if (data.minStaffing) {
-                    state.minStaffing = data.minStaffing;
-                    document.getElementById('input-min-staffing').value = data.minStaffing;
-                }
-                
-                state.minSubOfficer = data.minSubOfficer !== undefined ? data.minSubOfficer : 1;
-                document.getElementById('input-min-subofficer').value = state.minSubOfficer;
-                
-                state.minLarge = data.minLarge !== undefined ? data.minLarge : 1;
-                document.getElementById('input-min-large').value = state.minLarge;
-                
-                state.minParamedic = data.minParamedic !== undefined ? data.minParamedic : 1;
-                document.getElementById('input-min-paramedic').value = state.minParamedic;
-                
-                state.hourlyLeaves = data.hourlyLeaves || {};
-                
-                // 後方互換：古いvehicleAssignmentsの「救急車」データを「救急車1」に、「ポンプ車」を「タンク車」に、「通信車」を「卓上通信」にマッピング
-                let loadedAssignments = data.vehicleAssignments || {};
-                for (const dateStr in loadedAssignments) {
-                    if (loadedAssignments[dateStr]) {
-                        if (loadedAssignments[dateStr]["救急車"]) {
-                            loadedAssignments[dateStr]["救急車1"] = loadedAssignments[dateStr]["救急車"];
-                            delete loadedAssignments[dateStr]["救急車"];
-                        }
-                        if (loadedAssignments[dateStr]["ポンプ車"]) {
-                            loadedAssignments[dateStr]["タンク車"] = loadedAssignments[dateStr]["ポンプ車"];
-                            delete loadedAssignments[dateStr]["ポンプ車"];
-                        }
-                        if (loadedAssignments[dateStr]["通信車"]) {
-                            loadedAssignments[dateStr]["卓上通信"] = loadedAssignments[dateStr]["通信車"];
-                            delete loadedAssignments[dateStr]["通信車"];
-                        }
+    const elFileLoader = document.getElementById('file-loader');
+    if (elFileLoader) {
+        elFileLoader.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = async function(evt) {
+                try {
+                    const data = JSON.parse(evt.target.result);
+                    if (data.startDate) {
+                        const elInputStartDate = document.getElementById('input-start-date');
+                        if (elInputStartDate) elInputStartDate.value = data.startDate;
+                        state.startDate = data.startDate;
                     }
-                }
-                state.vehicleAssignments = loadedAssignments;
-                
-                // Load deployed vehicles if present, else apply preset
-                if (data.deployedVehicles) {
-                    let loadedVehicles = [...data.deployedVehicles];
-                    if (loadedVehicles.includes("救急車")) {
-                        loadedVehicles = loadedVehicles.filter(v => v !== "救急車");
-                        if (!loadedVehicles.includes("救急車1")) loadedVehicles.push("救急車1");
-                        if (!loadedVehicles.includes("救急車2")) loadedVehicles.push("救急車2");
-                    }
-                    if (loadedVehicles.includes("ポンプ車")) {
-                        loadedVehicles = loadedVehicles.filter(v => v !== "ポンプ車");
-                        if (!loadedVehicles.includes("タンク車")) loadedVehicles.push("タンク車");
-                    }
-                    if (loadedVehicles.includes("通信車")) {
-                        loadedVehicles = loadedVehicles.filter(v => v !== "通信車");
-                        if (!loadedVehicles.includes("卓上通信")) loadedVehicles.push("卓上通信");
-                    }
-                    state.deployedVehicles = loadedVehicles;
-                    syncDeployedVehiclesCheckboxes();
-                } else {
-                    applyStationVehiclePreset(state.station);
-                }
-
-                if (data.staffList) {
-                    state.staffList = data.staffList.map(s => ({
-                        id: s.id,
-                        name: s.name,
-                        platoon: s.platoon,
-                        rank: s.rank || "消防士",
-                        hasLargeLicense: s.hasLargeLicense || false,
-                        isParamedic: s.isParamedic || false,
-                        isRescue: s.isRescue || false,
-                        isKikan: s.isKikan || false,
-                        isDayWorker: s.isDayWorker || false,
-                        isSupport: s.isSupport || false,
-                        origin: s.origin || "",
-                        supportStart: s.supportStart || "",
-                        supportEnd: s.supportEnd || ""
-                    }));
-                    renderStaffInputs();
-                }
-                
-                // 後方互換マッピング処理: hopeShifts
-                state.hopeShifts = {};
-                if (data.hopeShifts) {
-                    const firstKey = Object.keys(data.hopeShifts)[0];
-                    if (firstKey && !firstKey.includes('_')) {
-                        // 古い形式：単一サイクルを第1サイクルにマッピング
-                        for (let staffId in data.hopeShifts) {
-                            state.hopeShifts[`1_${staffId}`] = data.hopeShifts[staffId];
-                        }
+                    if (data.activeCycle) {
+                        state.activeCycle = data.activeCycle;
+                        const elSelectCycle = document.getElementById('select-cycle');
+                        if (elSelectCycle) elSelectCycle.value = data.activeCycle;
                     } else {
-                        state.hopeShifts = data.hopeShifts;
+                        state.activeCycle = 1;
+                        const elSelectCycle = document.getElementById('select-cycle');
+                        if (elSelectCycle) elSelectCycle.value = 1;
                     }
-                }
-                // 不足している希望休の初期化
-                for (let c = 1; c <= 13; c++) {
-                    state.staffList.forEach(s => {
-                        const key = `${c}_${s.id}`;
-                        if (!state.hopeShifts[key]) {
-                            state.hopeShifts[key] = {};
-                        }
-                    });
-                }
-
-                // 後方互換マッピング処理: roster
-                state.roster = {};
-                if (data.roster) {
-                    const firstKey = Object.keys(data.roster)[0];
-                    if (firstKey && !firstKey.includes('_')) {
-                        // 古い形式：単一サイクルを第1サイクルにマッピング
-                        for (let staffId in data.roster) {
-                            state.roster[`1_${staffId}`] = data.roster[staffId];
-                        }
+                    if (data.station) {
+                        state.station = data.station;
                     } else {
-                        state.roster = data.roster;
+                        state.station = "本署";
                     }
-                }
-                // 不足しているサイクルの初期化 (絶対日数ベースで交互に)
-                for (let c = 1; c <= 13; c++) {
-                    state.staffList.forEach(staff => {
-                        const key = `${c}_${staff.id}`;
-                        if (!state.roster[key]) {
-                            const schedule = new Array(28);
-                            for (let d = 0; d < 28; d++) {
-                                const absoluteDay = (c - 1) * 28 + d;
-                                if (staff.platoon === 1) {
-                                    schedule[d] = (absoluteDay % 2 === 0) ? '当' : '明';
-                                } else {
-                                    schedule[d] = (absoluteDay % 2 === 1) ? '当' : '明';
-                                }
+                    const elInputStation = document.getElementById('input-station');
+                    if (elInputStation) elInputStation.value = state.station;
+                    updateStationTitle();
+
+                    if (data.shifts) {
+                        state.shifts = data.shifts;
+                    } else {
+                        state.shifts = [
+                            { key: "当", name: "勤務", char: "当", color: "#e0f2fe", textColor: "#0369a1", isSystem: true },
+                            { key: "明", name: "非番", char: "非", color: "#f3f4f6", textColor: "#4b5563", isSystem: true },
+                            { key: "休", name: "週休", char: "休", color: "#fef3c7", textColor: "#d97706", isSystem: true },
+                            { key: "有", name: "年休", char: "年", color: "#dcfce7", textColor: "#15803d" },
+                            { key: "公", name: "公休", char: "公", color: "#f3e8ff", textColor: "#6b21a8" },
+                            { key: "張", name: "出張", char: "張", color: "#e2f0fd", textColor: "#2563eb" },
+                            { key: "特", name: "特休", char: "特", color: "#fee2e2", textColor: "#dc2626" },
+                            { key: "病", name: "病休", char: "病", color: "#ffedd5", textColor: "#ea580c" }
+                        ];
+                    }
+                    renderShiftConfigList();
+                    renderLegend();
+
+                    if (data.platoonSize) {
+                        state.platoonSize = data.platoonSize;
+                        const elInputPlatoonSize = document.getElementById('input-platoon-size');
+                        if (elInputPlatoonSize) elInputPlatoonSize.value = data.platoonSize;
+                    }
+                    if (data.minStaffing) {
+                        state.minStaffing = data.minStaffing;
+                        const elInputMinStaffing = document.getElementById('input-min-staffing');
+                        if (elInputMinStaffing) elInputMinStaffing.value = data.minStaffing;
+                    }
+                    
+                    state.minSubOfficer = data.minSubOfficer !== undefined ? data.minSubOfficer : 1;
+                    const elInputMinSubofficer = document.getElementById('input-min-subofficer');
+                    if (elInputMinSubofficer) elInputMinSubofficer.value = state.minSubOfficer;
+                    
+                    state.minLarge = data.minLarge !== undefined ? data.minLarge : 1;
+                    const elInputMinLarge = document.getElementById('input-min-large');
+                    if (elInputMinLarge) elInputMinLarge.value = state.minLarge;
+                    
+                    state.minParamedic = data.minParamedic !== undefined ? data.minParamedic : 1;
+                    const elInputMinParamedic = document.getElementById('input-min-paramedic');
+                    if (elInputMinParamedic) elInputMinParamedic.value = state.minParamedic;
+                    
+                    state.hourlyLeaves = data.hourlyLeaves || {};
+                    
+                    // 後方互換
+                    let loadedAssignments = data.vehicleAssignments || {};
+                    for (const dateStr in loadedAssignments) {
+                        if (loadedAssignments[dateStr]) {
+                            if (loadedAssignments[dateStr]["救急車"]) {
+                                loadedAssignments[dateStr]["救急車1"] = loadedAssignments[dateStr]["救急車"];
+                                delete loadedAssignments[dateStr]["救急車"];
                             }
-                            state.roster[key] = schedule;
+                            if (loadedAssignments[dateStr]["ポンプ車"]) {
+                                loadedAssignments[dateStr]["タンク車"] = loadedAssignments[dateStr]["ポンプ車"];
+                                delete loadedAssignments[dateStr]["ポンプ車"];
+                            }
+                            if (loadedAssignments[dateStr]["通信車"]) {
+                                loadedAssignments[dateStr]["卓上通信"] = loadedAssignments[dateStr]["通信車"];
+                                delete loadedAssignments[dateStr]["通信車"];
+                            }
                         }
-                    });
+                    }
+                    state.vehicleAssignments = loadedAssignments;
+                    
+                    if (data.deployedVehicles) {
+                        let loadedVehicles = [...data.deployedVehicles];
+                        if (loadedVehicles.includes("救急車")) {
+                            loadedVehicles = loadedVehicles.filter(v => v !== "救急車");
+                            if (!loadedVehicles.includes("救急車1")) loadedVehicles.push("救急車1");
+                            if (!loadedVehicles.includes("救急車2")) loadedVehicles.push("救急車2");
+                        }
+                        if (loadedVehicles.includes("ポンプ車")) {
+                            loadedVehicles = loadedVehicles.filter(v => v !== "ポンプ車");
+                            if (!loadedVehicles.includes("タンク車")) loadedVehicles.push("タンク車");
+                        }
+                        if (loadedVehicles.includes("通信車")) {
+                            loadedVehicles = loadedVehicles.filter(v => v !== "通信車");
+                            if (!loadedVehicles.includes("卓上通信")) loadedVehicles.push("卓上通信");
+                        }
+                        state.deployedVehicles = loadedVehicles;
+                        syncDeployedVehiclesCheckboxes();
+                    } else {
+                        applyStationVehiclePreset(state.station);
+                    }
+
+                    if (data.staffList) {
+                        state.staffList = data.staffList.map(s => ({
+                            id: s.id,
+                            name: s.name,
+                            platoon: s.platoon,
+                            rank: s.rank || "消防士",
+                            hasLargeLicense: s.hasLargeLicense || false,
+                            isParamedic: s.isParamedic || false,
+                            isRescue: s.isRescue || false,
+                            isKikan: s.isKikan || false,
+                            isDayWorker: s.isDayWorker || false,
+                            isSupport: s.isSupport || false,
+                            origin: s.origin || "",
+                            supportStart: s.supportStart || "",
+                            supportEnd: s.supportEnd || ""
+                        }));
+                        renderStaffInputs();
+                    }
+                    
+                    state.hopeShifts = {};
+                    if (data.hopeShifts) {
+                        const firstKey = Object.keys(data.hopeShifts)[0];
+                        if (firstKey && !firstKey.includes('_')) {
+                            for (let staffId in data.hopeShifts) {
+                                state.hopeShifts[`1_${staffId}`] = data.hopeShifts[staffId];
+                            }
+                        } else {
+                            state.hopeShifts = data.hopeShifts;
+                        }
+                    }
+                    for (let c = 1; c <= 13; c++) {
+                        state.staffList.forEach(s => {
+                            const key = `${c}_${s.id}`;
+                            if (!state.hopeShifts[key]) {
+                                state.hopeShifts[key] = {};
+                            }
+                        });
+                    }
+
+                    state.roster = {};
+                    if (data.roster) {
+                        const firstKey = Object.keys(data.roster)[0];
+                        if (firstKey && !firstKey.includes('_')) {
+                            for (let staffId in data.roster) {
+                                state.roster[`1_${staffId}`] = data.roster[staffId];
+                            }
+                        } else {
+                            state.roster = data.roster;
+                        }
+                    }
+                    for (let c = 1; c <= 13; c++) {
+                        state.staffList.forEach(staff => {
+                            const key = `${c}_${staff.id}`;
+                            if (!state.roster[key]) {
+                                const schedule = new Array(28);
+                                for (let d = 0; d < 28; d++) {
+                                    const absoluteDay = (c - 1) * 28 + d;
+                                    if (staff.platoon === 1) {
+                                        schedule[d] = (absoluteDay % 2 === 0) ? '当' : '明';
+                                    } else {
+                                        schedule[d] = (absoluteDay % 2 === 1) ? '当' : '明';
+                                    }
+                                }
+                                state.roster[key] = schedule;
+                            }
+                        });
+                    }
+                    
+                    handleDateChange();
+                    await showCustomAlert("設定データを読み込みました。");
+                } catch (err) {
+                    await showCustomAlert(`ファイルのパースに失敗しました: ${err.message}`);
                 }
-                
-                handleDateChange();
-                await showCustomAlert("設定データを読み込みました。");
-            } catch (err) {
-                await showCustomAlert(`ファイルのパースに失敗しました: ${err.message}`);
-            }
-        };
-        reader.readAsText(file);
-        e.target.value = '';
-    });
+            };
+            reader.readAsText(file);
+            e.target.value = '';
+        });
+    }
 
     // モーダルキャンセル
-    document.getElementById('btn-modal-cancel').addEventListener('click', hideShiftModal);
+    const elBtnModalCancel = document.getElementById('btn-modal-cancel');
+    if (elBtnModalCancel) {
+        elBtnModalCancel.addEventListener('click', hideShiftModal);
+    }
 
     // ログイン・ログアウトのイベントバインド
-    document.getElementById('btn-login-viewer').addEventListener('click', () => {
-        loginAs('viewer');
-    });
+    const elBtnLoginViewer = document.getElementById('btn-login-viewer');
+    if (elBtnLoginViewer) {
+        elBtnLoginViewer.addEventListener('click', () => {
+            loginAs('viewer');
+        });
+    }
 
-    document.getElementById('login-admin-form').addEventListener('submit', (e) => {
-        e.preventDefault();
-        const usernameInput = document.getElementById('login-username');
-        const passwordInput = document.getElementById('login-password');
-        const errorMsg = document.getElementById('login-error-msg');
-        
-        const username = usernameInput.value.trim();
-        const password = passwordInput.value;
-        
-        if (username === 'admin' && (password === '119' || password === 'admin')) {
-            errorMsg.style.display = 'none';
-            loginAs('admin');
-        } else {
-            errorMsg.textContent = 'IDまたはパスワードが正しくありません。';
-            errorMsg.style.display = 'block';
+    const elLoginAdminForm = document.getElementById('login-admin-form');
+    if (elLoginAdminForm) {
+        elLoginAdminForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const usernameInput = document.getElementById('login-username');
+            const passwordInput = document.getElementById('login-password');
+            const errorMsg = document.getElementById('login-error-msg');
             
-            // エラー表示時のシェイクアニメーションの再トリガー
-            const card = document.querySelector('.login-card');
-            if (card) {
-                card.classList.remove('login-error-msg');
-                void card.offsetWidth; // リフローをトリガーしてアニメーションをリセット
-                card.classList.add('login-error-msg');
+            const username = usernameInput ? usernameInput.value.trim() : '';
+            const password = passwordInput ? passwordInput.value : '';
+            
+            if (username === 'admin' && (password === '119' || password === 'admin')) {
+                if (errorMsg) errorMsg.style.display = 'none';
+                loginAs('admin');
+            } else {
+                if (errorMsg) {
+                    errorMsg.textContent = 'IDまたはパスワードが正しくありません。';
+                    errorMsg.style.display = 'block';
+                }
+                
+                const card = document.querySelector('.login-card');
+                if (card) {
+                    card.classList.remove('login-error-msg');
+                    void card.offsetWidth;
+                    card.classList.add('login-error-msg');
+                }
             }
-        }
-    });
+        });
+    }
 
-    document.getElementById('btn-logout').addEventListener('click', async () => {
-        const confirmLogout = await showCustomConfirm('ログアウトしてもよろしいですか？');
-        if (confirmLogout) {
-            logout();
-        }
-    });
+    const elBtnLogout = document.getElementById('btn-logout');
+    if (elBtnLogout) {
+        elBtnLogout.addEventListener('click', async () => {
+            const confirmLogout = await showCustomConfirm('ログアウトしてもよろしいですか？');
+            if (confirmLogout) {
+                logout();
+            }
+        });
+    }
 
     // 車両配置イベントのバインド
     bindVehicleEvents();
@@ -1620,14 +2171,18 @@ function bindEvents() {
 function refreshUI() {
     // 閲覧専用モードなら各種設定の入力を無効化
     const isAdmin = state.userRole === 'admin';
-    document.getElementById('input-station').disabled = !isAdmin;
-    document.getElementById('input-start-date').disabled = !isAdmin;
-    document.getElementById('input-platoon-size').disabled = !isAdmin;
-    document.getElementById('input-min-staffing').disabled = !isAdmin;
-    document.getElementById('input-min-subofficer').disabled = !isAdmin;
-    document.getElementById('input-min-large').disabled = !isAdmin;
-    document.getElementById('input-min-paramedic').disabled = !isAdmin;
-    document.getElementById('select-regen-start-day').disabled = !isAdmin;
+    const setDisabled = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = val;
+    };
+    setDisabled('input-station', !isAdmin);
+    setDisabled('input-start-date', !isAdmin);
+    setDisabled('input-platoon-size', !isAdmin);
+    setDisabled('input-min-staffing', !isAdmin);
+    setDisabled('input-min-subofficer', !isAdmin);
+    setDisabled('input-min-large', !isAdmin);
+    setDisabled('input-min-paramedic', !isAdmin);
+    setDisabled('select-regen-start-day', !isAdmin);
     const chkAutoLeave = document.getElementById('chk-auto-leave');
     if (chkAutoLeave) chkAutoLeave.disabled = !isAdmin;
     
@@ -1701,7 +2256,7 @@ function createTableHeader(thead, isRosterTable) {
     
     // アクティブサイクルの開始日を計算
     const activeStartDate = new Date(state.startDate);
-    activeStartDate.setDate(state.startDate.getDate() + (state.activeCycle - 1) * 28);
+    activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
     
     for (let d = 0; d < 28; d++) {
         const date = new Date(activeStartDate);
@@ -1765,7 +2320,7 @@ function renderRosterTable() {
     container.innerHTML = '';
     
     const activeStartDate = new Date(state.startDate);
-    activeStartDate.setDate(state.startDate.getDate() + (state.activeCycle - 1) * 28);
+    activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
     
     [1, 2].forEach(platoonNum => {
         // セクションタイトル
@@ -2154,7 +2709,7 @@ function renderHopeTable() {
     container.innerHTML = '';
     
     const activeStartDate = new Date(state.startDate);
-    activeStartDate.setDate(state.startDate.getDate() + (state.activeCycle - 1) * 28);
+    activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
     
     [1, 2].forEach(platoonNum => {
         const sectionTitle = document.createElement('div');
@@ -2261,7 +2816,7 @@ function renderCalendarView() {
     });
     
     const activeStartDate = new Date(state.startDate);
-    activeStartDate.setDate(state.startDate.getDate() + (state.activeCycle - 1) * 28);
+    activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
     
     const startWday = activeStartDate.getDay();
     for (let p = 0; p < startWday; p++) {
@@ -2520,7 +3075,7 @@ function showShiftModal(staffId, staffName, dayIndex, isPreScheduling = false) {
     currentEditCell = { staffId, dayIndex, isPreScheduling };
     
     const activeStartDate = new Date(state.startDate);
-    activeStartDate.setDate(state.startDate.getDate() + (state.activeCycle - 1) * 28);
+    activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
     
     const date = new Date(activeStartDate);
     date.setDate(activeStartDate.getDate() + dayIndex);
@@ -3028,7 +3583,7 @@ function renderVehicleView() {
     let dateStr = document.getElementById('vehicle-date-select').value;
     if (!dateStr) {
         const activeStartDate = new Date(state.startDate);
-        activeStartDate.setDate(state.startDate.getDate() + (state.activeCycle - 1) * 28);
+        activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
         dateStr = activeStartDate.toISOString().split('T')[0];
         document.getElementById('vehicle-date-select').value = dateStr;
     }
@@ -3071,7 +3626,7 @@ function renderVehicleView() {
     }
     
     // 左側: 出勤メンバー一覧の描画
-    const staffListEl = document.getElementById('vehicle-staff-list');
+    const staffListEl = document.getElementById('vehicle-duty-staff-list');
     staffListEl.innerHTML = '';
     
     // 階級グループの定義（上から順に表示）
@@ -3492,7 +4047,7 @@ function bindVehicleEvents() {
     }
     
     // AI提案ボタン
-    const btnPropose = document.getElementById('btn-vehicle-ai-propose');
+    const btnPropose = document.getElementById('btn-vehicle-suggest');
     if (btnPropose) {
         btnPropose.addEventListener('click', () => {
             const dateStr = document.getElementById('vehicle-date-select').value;
@@ -3784,3 +4339,14 @@ function bindVehicleCheckboxEvents() {
         }
     });
 }
+
+
+// Expose state and render
+return {
+    state,
+    render
+};
+
+})();
+
+window.Schedule = Schedule;

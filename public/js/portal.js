@@ -1,6 +1,13 @@
 /**
  * 消防ポータルシステム 統合SPAコントローラー (Portal)
  */
+const portalStorage = window.safeStorage || window.localStorage || {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {}
+};
+
 const Portal = {
     currentPage: null,
     clockInterval: null,
@@ -16,6 +23,12 @@ const Portal = {
 
         // 初期ローダーを非表示にし、レンダリング準備
         document.getElementById('initial-loader')?.remove();
+        
+        // モーダル閉じるボタンのイベントバインド
+        const modalCloseBtn = document.getElementById('modal-close-btn');
+        if (modalCloseBtn) {
+            modalCloseBtn.addEventListener('click', () => Portal.closeModal());
+        }
         
         let isAuthenticated = false;
         try {
@@ -47,7 +60,7 @@ const Portal = {
         
         // テーマ初期設定
         try {
-            const storedTheme = safeStorage.getItem('theme') || 'light';
+            const storedTheme = portalStorage.getItem('theme') || 'light';
             document.body.setAttribute('data-theme', storedTheme);
         } catch (err) {
             console.warn('Failed to load theme:', err);
@@ -321,7 +334,7 @@ const Portal = {
                     break;
                 case 'schedule':
                     breadcrumb.textContent = '勤務スケジュール';
-                    this.renderSchedulePlaceholder(contentBody);
+                    await Schedule.render(contentBody);
                     break;
                 case 'leave':
                     breadcrumb.textContent = '休暇申請';
@@ -379,7 +392,7 @@ const Portal = {
         const newTheme = currentTheme === 'light' ? 'dark' : 'light';
         document.body.setAttribute('data-theme', newTheme);
         try {
-            safeStorage.setItem('theme', newTheme);
+            portalStorage.setItem('theme', newTheme);
         } catch (err) {
             console.warn('Failed to save theme preference:', err);
         }

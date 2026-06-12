@@ -182,7 +182,11 @@ router.put('/staff/:id', verifyToken, requireRole('admin', 'sysadmin'), (req, re
  * @desc    管理者ダッシュボード用の統計データ取得
  */
 router.get('/dashboard', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
-    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const today = `${year}-${month}-${day}`;
     
     try {
         let staffCountParams = [req.user.department_id];

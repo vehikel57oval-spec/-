@@ -1,6 +1,13 @@
 /**
  * 消防ポータルシステム 認証モジュール (Auth)
  */
+const authStorage = window.safeStorage || window.localStorage || {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {}
+};
+
 const Auth = {
     token: null,
     user: null,
@@ -43,7 +50,7 @@ const Auth = {
 
             this.token = data.token;
             this.user = data.user;
-            safeStorage.setItem('fire_dept_token', this.token);
+            authStorage.setItem('fire_dept_token', this.token);
             
             return data;
         } catch (err) {
@@ -63,7 +70,7 @@ const Auth = {
         } finally {
             this.token = null;
             this.user = null;
-            safeStorage.removeItem('fire_dept_token');
+            authStorage.removeItem('fire_dept_token');
             window.location.reload();
         }
     },
@@ -72,7 +79,7 @@ const Auth = {
      * 認証状態チェック
      */
     async checkAuth() {
-        const storedToken = safeStorage.getItem('fire_dept_token');
+        const storedToken = authStorage.getItem('fire_dept_token');
         if (!storedToken) {
             this.token = null;
             this.user = null;
@@ -91,7 +98,7 @@ const Auth = {
 
             if (!response.ok) {
                 // トークンが無効な場合は削除
-                safeStorage.removeItem('fire_dept_token');
+                authStorage.removeItem('fire_dept_token');
                 this.token = null;
                 this.user = null;
                 return false;
@@ -135,7 +142,7 @@ const Auth = {
     },
 
     getToken() {
-        return this.token || safeStorage.getItem('fire_dept_token');
+        return this.token || authStorage.getItem('fire_dept_token');
     },
 
     isLoggedIn() {

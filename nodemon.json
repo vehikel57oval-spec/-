@@ -1,0 +1,3 @@
+{
+  "ignore": ["server/db/db.json"]
+}
