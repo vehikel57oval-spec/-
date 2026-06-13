@@ -145,9 +145,7 @@ h1, h2, h3, h4, h5, h6 {
 .header-logo h1 {
     font-size: 20px;
     letter-spacing: -0.5px;
-    background: linear-gradient(135deg, var(--primary-color) 0%, #db2777 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--primary-color);
 }
 
 .header-controls {
@@ -1540,9 +1538,7 @@ h1, h2, h3, h4, h5, h6 {
     display: flex;
     justify-content: center;
     align-items: center;
-    background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.15), transparent 40%),
-                radial-gradient(circle at bottom left, rgba(219, 39, 119, 0.1), transparent 40%),
-                var(--bg-app);
+    background: var(--bg-app);
     z-index: 9999;
     padding: 20px;
     overflow-y: auto;
@@ -1607,9 +1603,7 @@ h1, h2, h3, h4, h5, h6 {
     font-size: 22px;
     font-weight: 700;
     letter-spacing: -0.5px;
-    background: linear-gradient(135deg, var(--primary-color) 0%, #db2777 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--primary-color);
     margin-top: 8px;
 }
 

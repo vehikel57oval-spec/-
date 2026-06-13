@@ -41,12 +41,8 @@ const Portal = {
         
         if (isAuthenticated) {
             this.renderPortalLayout();
-            // 一般職員は打刻画面へ、その他はダッシュボードへ遷移 (即打刻対応)
-            if (Auth.user && Auth.user.role === 'staff') {
-                this.navigate('attendance');
-            } else {
-                this.navigate('dashboard');
-            }
+            // ダッシュボードへ遷移
+            this.navigate('dashboard');
         } else {
             // 消防本部リストをロード
             try {
@@ -144,11 +140,7 @@ const Portal = {
             
             // レイアウトをレンダリングして権限に応じた画面へ遷移 (即打刻対応)
             this.renderPortalLayout();
-            if (Auth.user && Auth.user.role === 'staff') {
-                this.navigate('attendance');
-            } else {
-                this.navigate('dashboard');
-            }
+            this.navigate('dashboard');
         } catch (err) {
             this.showToast(err.message, 'error');
         }
@@ -240,7 +232,6 @@ const Portal = {
         
         let menuItems = [
             { id: 'dashboard', label: 'ダッシュボード', icon: 'layout-dashboard' },
-            { id: 'attendance', label: '出退勤・打刻入力', icon: 'clipboard-signature' },
             { id: 'schedule', label: '勤務スケジュール', icon: 'calendar-days' },
             { id: 'leave', label: '休暇申請', icon: 'file-text' }
         ];
@@ -248,6 +239,7 @@ const Portal = {
         // 署長(chief)や管理者の場合
         if (Auth.hasRole('chief', 'admin', 'sysadmin')) {
             menuItems.push({ id: 'approvals', label: '打刻修正承認', icon: 'check-square', badge: true });
+            menuItems.push({ id: 'holiday_allowance', label: '祝日手当検証', icon: 'calculator' });
             menuItems.push({ id: 'staff_admin', label: '職員管理', icon: 'users' });
         }
         
@@ -329,9 +321,9 @@ const Portal = {
                     await Dashboard.render(contentBody);
                     break;
                 case 'attendance':
-                    breadcrumb.textContent = '出退勤・打刻入力';
-                    await Attendance.render(contentBody);
-                    break;
+                    // ダッシュボードへリダイレクト
+                    this.navigate('dashboard');
+                    return;
                 case 'schedule':
                     breadcrumb.textContent = '勤務スケジュール';
                     await Schedule.render(contentBody);
@@ -347,6 +339,10 @@ const Portal = {
                 case 'staff_admin':
                     breadcrumb.textContent = '職員管理';
                     await this.renderStaffAdminPage(contentBody);
+                    break;
+                case 'holiday_allowance':
+                    breadcrumb.textContent = '祝日手当検証';
+                    await HolidayAllowance.render(contentBody);
                     break;
                 case 'settings':
                     breadcrumb.textContent = 'システム設定';

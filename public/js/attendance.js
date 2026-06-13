@@ -77,14 +77,18 @@ const Attendance = {
                     </div>
                     
                     <!-- スケジュール＆状態 -->
-                    <div style="display:flex; gap:16px; align-items:center;">
-                        <span class="badge ${statusClass}" style="font-size:14px; padding:6px 12px;">現在の状態: ${statusLabel}</span>
+                    <div style="display:flex; gap:16px; align-items:center; justify-content:center; flex-wrap:wrap; width:100%; margin-bottom: 8px;">
+                        <span class="badge ${statusClass}" style="font-size:14px; padding:6px 12px; white-space:nowrap; flex-shrink:0;">現在の状態: ${statusLabel}</span>
                         ${schedule ? `
-                            <div class="shift-info-badge">
+                            <div class="shift-info-badge" style="white-space:nowrap; flex-shrink:0;">
                                 <i data-lucide="calendar"></i>
                                 <span>本日の勤務予定: <strong>${schedule.shift_key} (${schedule.start_time || '08:30'}〜)</strong></span>
                             </div>
                         ` : ''}
+                        <div class="shift-info-badge" style="background: rgba(255,107,107,0.08); border: 1px solid rgba(255,107,107,0.2); color: var(--accent-fire); white-space:nowrap; flex-shrink:0;">
+                            <i data-lucide="truck" style="color: var(--accent-fire); width: 16px; height: 16px;"></i>
+                            <span>本日の乗車車両: <strong>${data.vehicleAssignment ? `${data.vehicleAssignment.vehicle_name} (${data.vehicleAssignment.role_name})` : 'なし (徒歩/待機)'}</strong></span>
+                        </div>
                     </div>
                     
                     <!-- 巨大な打刻ボタン -->

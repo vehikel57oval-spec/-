@@ -3,6 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const db = require('../db/database');
 const { verifyToken, requireRole } = require('../middleware/auth');
+const { parseDate, getJapaneseHoliday, getHolidayType } = require('../utils/holidays');
 
 /**
  * @route   GET /api/admin/staff
@@ -338,6 +339,570 @@ router.put('/settings', verifyToken, requireRole('admin', 'sysadmin'), (req, res
             .run(req.user.id, 'update_settings', `設定更新: ${name}, システム: ${shift_system}, サイクル: ${cycle_days}日, 丸め: 出勤 ${clock_in_unit}分(${clock_in_direction}) / 退勤 ${clock_out_unit}分(${clock_out_direction})`);
             
         res.json({ message: 'システム設定を更新しました。' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
+// A当番（第1小隊当直）の日かどうかを判定する
+function isPlatoon1DutyDay(dateStr) {
+    let anchorDateStr = '2026-06-01'; // デフォルト (第1小隊当直日)
+    try {
+        const row = db.prepare('SELECT start_date FROM schedule_staff_overrides LIMIT 1').get();
+        if (row && row.start_date) {
+            anchorDateStr = row.start_date;
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    const anchor = parseDate(anchorDateStr);
+    const target = parseDate(dateStr);
+    const diffTime = Math.abs(target - anchor);
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24)) * (target < anchor ? -1 : 1);
+    
+    return (diffDays % 2 === 0);
+}
+
+// 翌日の日付文字列
+function getNextDate(dateStr) {
+    const d = parseDate(dateStr);
+    d.setDate(d.getDate() + 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dateVal = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dateVal}`;
+}
+
+// 前日の日付文字列
+function getPreviousDate(dateStr) {
+    const d = parseDate(dateStr);
+    d.setDate(d.getDate() - 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dateVal = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dateVal}`;
+}
+
+// 祝日手当の自動計算ロジック
+function calculateHolidayAllowanceInternal(staff, yearMonth) {
+    const yearMonthParts = yearMonth.split('-');
+    const year = parseInt(yearMonthParts[0], 10);
+    const month = parseInt(yearMonthParts[1], 10);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const platoon = staff.platoon;
+    const startDate = `${yearMonth}-01`;
+    const endDate = `${yearMonth}-${String(daysInMonth).padStart(2, '0')}`;
+    
+    // schedule_entries から当月のシフト取得
+    const entries = db.prepare('SELECT * FROM schedule_entries WHERE staff_id = ? AND work_date BETWEEN ? AND ?')
+        .all(staff.id, startDate, endDate);
+        
+    const entryMap = {};
+    entries.forEach(e => {
+        entryMap[e.work_date] = e.shift_key;
+    });
+    
+    // 休暇申請取得
+    const leaves = db.prepare('SELECT * FROM leave_requests WHERE staff_id = ? AND status = "approved" AND (start_date <= ? AND end_date >= ?)')
+        .all(staff.id, endDate, startDate);
+        
+    const leaveMap = {};
+    leaves.forEach(l => {
+        const start = parseDate(l.start_date);
+        const end = parseDate(l.end_date);
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const dateVal = String(d.getDate()).padStart(2, '0');
+            const dateStr = `${y}-${m}-${dateVal}`;
+            if (dateStr >= startDate && dateStr <= endDate) {
+                leaveMap[dateStr] = l.leave_type;
+            }
+        }
+    });
+
+    const details = [];
+    const slideQueue12 = [];
+    const slideQueue4 = [];
+    const allowanceMap = {};
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${yearMonth}-${String(day).padStart(2, '0')}`;
+        const holidayType = getHolidayType(dateStr);
+        const isHol = (holidayType !== null);
+        const actualShift = entryMap[dateStr] || '休';
+        
+        let baseShift = '非';
+        if (platoon === '1bu') {
+            baseShift = isPlatoon1DutyDay(dateStr) ? '当' : '非';
+        } else if (platoon === '2bu') {
+            baseShift = isPlatoon1DutyDay(dateStr) ? '非' : '当';
+        } else {
+            baseShift = '日';
+        }
+        
+        if (isHol && (platoon === '1bu' || platoon === '2bu')) {
+            const isLawHoliday = (holidayType === 'national');
+            
+            if (baseShift === '当') {
+                if (actualShift === '休' || actualShift === '公' || leaveMap[dateStr] === 'compensatory') {
+                    if (isLawHoliday) {
+                        slideQueue12.push({ sourceDate: dateStr });
+                    }
+                } else {
+                    allowanceMap[dateStr] = {
+                        type: '当日分',
+                        original_hours: 12.0,
+                        hours: 12.0,
+                        is_cut: false,
+                        reason: 'duty_on_holiday'
+                    };
+                }
+            } else if (baseShift === '非') {
+                const isNewYear = (dateStr.endsWith('-12-29') || dateStr.endsWith('-12-30') || dateStr.endsWith('-12-31') || dateStr.endsWith('-01-02') || dateStr.endsWith('-01-03'));
+                const hours = isNewYear ? 3.5 : 4.0;
+                
+                const yesterdayStr = getPreviousDate(dateStr);
+                const yesterdayActualShift = entryMap[yesterdayStr] || '当'; // デフォルトは当直勤務とみなす
+                
+                // 非番の当日に公休であっても、前日当直していたら朝の勤務が発生するためスライドしない
+                const wasOnDutyYesterday = (yesterdayActualShift === '当');
+                
+                if ((actualShift === '休' || actualShift === '公' || leaveMap[dateStr] === 'compensatory') && !wasOnDutyYesterday) {
+                    if (isLawHoliday) {
+                        slideQueue4.push({ sourceDate: dateStr, hours: hours });
+                    }
+                } else {
+                    allowanceMap[dateStr] = {
+                        type: '当日分',
+                        original_hours: hours,
+                        hours: hours,
+                        is_cut: false,
+                        reason: 'duty_on_holiday_off'
+                    };
+                }
+            }
+        }
+    }
+    
+    slideQueue12.forEach(item => {
+        let targetDate = getNextDate(item.sourceDate);
+        let mapped = false;
+        let limit = 0;
+        
+        while (!mapped && limit < 60) {
+            limit++;
+            const baseShift = platoon === '1bu' ? (isPlatoon1DutyDay(targetDate) ? '当' : '非') : (isPlatoon1DutyDay(targetDate) ? '非' : '当');
+            const actualShift = entryMap[targetDate] || '休';
+            
+            // 本来の週休 (公休) か、後から取得した代休・振替休日かを判定
+            const isOriginalHoliday = (actualShift === '休' || actualShift === '公') && (leaveMap[targetDate] !== 'compensatory');
+            
+            if (baseShift === '当' && !isOriginalHoliday && !allowanceMap[targetDate]) {
+                const isCut = (leaveMap[targetDate] === 'compensatory' || actualShift === '休' || actualShift === '公');
+                allowanceMap[targetDate] = {
+                    type: 'スライド分',
+                    original_hours: 12.0,
+                    hours: isCut ? 0.0 : 12.0,
+                    is_cut: isCut,
+                    reason: isCut ? 'cut_due_to_substitute_holiday' : `slided_from_${item.sourceDate}`,
+                    source_date: item.sourceDate
+                };
+                mapped = true;
+            } else {
+                targetDate = getNextDate(targetDate);
+            }
+        }
+    });
+
+    slideQueue4.forEach(item => {
+        let targetDate = getNextDate(item.sourceDate);
+        let mapped = false;
+        let limit = 0;
+        
+        while (!mapped && limit < 60) {
+            limit++;
+            const baseShift = platoon === '1bu' ? (isPlatoon1DutyDay(targetDate) ? '当' : '非') : (isPlatoon1DutyDay(targetDate) ? '非' : '当');
+            const actualShift = entryMap[targetDate] || '休';
+            
+            const isOriginalHoliday = (actualShift === '休' || actualShift === '公') && (leaveMap[targetDate] !== 'compensatory');
+            
+            if (baseShift === '非' && !isOriginalHoliday && !allowanceMap[targetDate]) {
+                const isCut = (leaveMap[targetDate] === 'compensatory' || actualShift === '休' || actualShift === '公');
+                allowanceMap[targetDate] = {
+                    type: 'スライド分',
+                    original_hours: item.hours,
+                    hours: isCut ? 0.0 : item.hours,
+                    is_cut: isCut,
+                    reason: isCut ? 'cut_due_to_substitute_holiday' : `slided_from_${item.sourceDate}`,
+                    source_date: item.sourceDate
+                };
+                mapped = true;
+            } else {
+                targetDate = getNextDate(targetDate);
+            }
+        }
+    });
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${yearMonth}-${String(day).padStart(2, '0')}`;
+        const item = allowanceMap[dateStr];
+        
+        const isHol = (getHolidayType(dateStr) !== null);
+        const actualShift = entryMap[dateStr] || '休';
+        const baseShift = platoon === '1bu' ? (isPlatoon1DutyDay(dateStr) ? '当' : '非') : (isPlatoon1DutyDay(dateStr) ? '非' : '当');
+
+        if (item) {
+            details.push({
+                date: dateStr,
+                holiday_name: getJapaneseHoliday(parseDate(dateStr)) || '条例休日',
+                base_shift: baseShift,
+                actual_shift: actualShift,
+                type: item.type,
+                original_hours: item.original_hours,
+                hours: item.hours,
+                is_cut: item.is_cut,
+                reason: item.reason,
+                source_date: item.source_date || null
+            });
+        } else {
+            details.push({
+                date: dateStr,
+                holiday_name: isHol ? (getJapaneseHoliday(parseDate(dateStr)) || '条例休日') : null,
+                base_shift: baseShift,
+                actual_shift: actualShift,
+                type: '対象外',
+                original_hours: 0.0,
+                hours: 0.0,
+                is_cut: false,
+                reason: 'no_holiday_duty'
+            });
+        }
+    }
+    
+    // 合計時間の算出
+    const totalHours = details.reduce((sum, d) => sum + d.hours, 0.0);
+    
+    return {
+        details,
+        totalHours
+    };
+}
+
+/**
+ * @route   GET /api/admin/holiday-allowance
+ * @desc    月次祝日手当一覧の取得 (自動計算＆確定台帳ロード)
+ */
+router.get('/holiday-allowance', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
+    const { year_month } = req.query;
+    if (!year_month || !/^\d{4}-\d{2}$/.test(year_month)) {
+        return res.status(400).json({ error: '対象月度 (YYYY-MM) を指定してください。' });
+    }
+    
+    try {
+        let query = `
+            SELECT s.id, s.employee_number, s.name, s.platoon, s.rank, 
+                   st.name as station_name, st.id as station_id
+            FROM staff s
+            JOIN stations st ON s.station_id = st.id
+            WHERE s.department_id = ? AND s.is_active = 1 AND s.platoon IN ('1bu', '2bu')
+        `;
+        let params = [req.user.department_id];
+        
+        if (req.user.role === 'chief') {
+            query += ' AND s.station_id = ?';
+            params.push(req.user.station_id);
+        }
+        
+        query += ' ORDER BY st.id ASC, s.employee_number ASC';
+        const staffList = db.prepare(query).all(...params);
+        
+        const ledgers = db.prepare('SELECT * FROM holiday_allowance_ledgers WHERE year_month = ?').all(year_month);
+        const ledgerMap = {};
+        ledgers.forEach(l => {
+            ledgerMap[l.staff_id] = l;
+        });
+        
+        const results = staffList.map(staff => {
+            const ledger = ledgerMap[staff.id];
+            if (ledger) {
+                const details = typeof ledger.details === 'string' ? JSON.parse(ledger.details) : ledger.details;
+                
+                const holiday_tou = details.filter(d => d.type === '当日分' && d.base_shift === '当' && !d.is_cut).length;
+                const holiday_off = details.filter(d => d.type === '当日分' && d.base_shift === '非' && !d.is_cut).length;
+                const slided_days = details.filter(d => d.type === 'スライド分' && !d.is_cut).length;
+
+                return {
+                    staff_id: staff.id,
+                    employee_number: staff.employee_number,
+                    name: staff.name,
+                    platoon: staff.platoon,
+                    rank: staff.rank,
+                    station_name: staff.station_name,
+                    holiday_tou,
+                    holiday_off,
+                    slided_days,
+                    total_hours: ledger.total_hours,
+                    status: ledger.status,
+                    confirmed_at: ledger.confirmed_at
+                };
+            } else {
+                const { details, totalHours } = calculateHolidayAllowanceInternal(staff, year_month);
+                
+                const holiday_tou = details.filter(d => d.type === '当日分' && d.base_shift === '当' && !d.is_cut).length;
+                const holiday_off = details.filter(d => d.type === '当日分' && d.base_shift === '非' && !d.is_cut).length;
+                const slided_days = details.filter(d => d.type === 'スライド分' && !d.is_cut).length;
+
+                return {
+                    staff_id: staff.id,
+                    employee_number: staff.employee_number,
+                    name: staff.name,
+                    platoon: staff.platoon,
+                    rank: staff.rank,
+                    station_name: staff.station_name,
+                    holiday_tou,
+                    holiday_off,
+                    slided_days,
+                    total_hours: totalHours,
+                    status: 'auto',
+                    confirmed_at: null
+                };
+            }
+        });
+        
+        res.json({ results });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
+/**
+ * @route   GET /api/admin/holiday-allowance/staff/:staffId
+ * @desc    個別職員の月次詳細・マッピングの取得
+ */
+router.get('/holiday-allowance/staff/:staffId', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
+    const { staffId } = req.params;
+    const { year_month } = req.query;
+    
+    if (!year_month || !/^\d{4}-\d{2}$/.test(year_month)) {
+        return res.status(400).json({ error: '対象月度 (YYYY-MM) を指定してください。' });
+    }
+    
+    try {
+        const staff = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId);
+        if (!staff) {
+            return res.status(404).json({ error: '指定された職員が見つかりません。' });
+        }
+        
+        const ledger = db.prepare('SELECT * FROM holiday_allowance_ledgers WHERE year_month = ? AND staff_id = ?').get(year_month, staffId);
+        
+        if (ledger) {
+            const details = typeof ledger.details === 'string' ? JSON.parse(ledger.details) : ledger.details;
+            res.json({
+                staff,
+                status: ledger.status,
+                details,
+                total_hours: ledger.total_hours,
+                confirmed_at: ledger.confirmed_at
+            });
+        } else {
+            const { details, totalHours } = calculateHolidayAllowanceInternal(staff, year_month);
+            res.json({
+                staff,
+                status: 'auto',
+                details,
+                total_hours: totalHours,
+                confirmed_at: null
+            });
+        }
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
+/**
+ * @route   POST /api/admin/holiday-allowance/save
+ * @desc    職員の祝日手当の手動調整の保存 (draftとして保存)
+ */
+router.post('/holiday-allowance/save', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
+    const { year_month, staff_id, details, total_hours } = req.body;
+    
+    if (!year_month || !staff_id || !details || total_hours === undefined) {
+        return res.status(400).json({ error: 'パラメータが不足しています。' });
+    }
+    
+    try {
+        const existing = db.prepare('SELECT * FROM holiday_allowance_ledgers WHERE year_month = ? AND staff_id = ?').get(year_month, staff_id);
+        if (existing && existing.status === 'locked') {
+            return res.status(400).json({ error: 'このデータはすでに確定（ロック）されているため編集できません。' });
+        }
+        
+        const detailsJson = typeof details === 'string' ? details : JSON.stringify(details);
+        
+        db.prepare(`
+            INSERT OR REPLACE INTO holiday_allowance_ledgers 
+            (year_month, staff_id, status, details, total_hours, confirmed_by, confirmed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            year_month,
+            parseInt(staff_id),
+            'draft',
+            detailsJson,
+            parseFloat(total_hours),
+            null,
+            null
+        );
+        
+        res.json({ message: '手動調整内容を一時保存しました。' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
+/**
+ * @route   POST /api/admin/holiday-allowance/lock
+ * @desc    月次祝日手当の確定・ロック (指定の年月の一括確定または単一職員確定)
+ */
+router.post('/holiday-allowance/lock', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
+    const { year_month, staff_id } = req.body;
+    
+    if (!year_month) {
+        return res.status(400).json({ error: '対象月度 (year_month) が必要です。' });
+    }
+    
+    try {
+        const confirmedAt = new Date().toISOString();
+        
+        if (staff_id) {
+            const existing = db.prepare('SELECT * FROM holiday_allowance_ledgers WHERE year_month = ? AND staff_id = ?').get(year_month, staff_id);
+            let detailsJson, totalHours;
+            
+            if (existing) {
+                detailsJson = typeof existing.details === 'string' ? existing.details : JSON.stringify(existing.details);
+                totalHours = existing.total_hours;
+            } else {
+                const staff = db.prepare('SELECT * FROM staff WHERE id = ?').get(staff_id);
+                if (!staff) return res.status(404).json({ error: '職員が見つかりません。' });
+                const { details, totalHours: computedHours } = calculateHolidayAllowanceInternal(staff, year_month);
+                detailsJson = JSON.stringify(details);
+                totalHours = computedHours;
+            }
+            
+            db.prepare(`
+                INSERT OR REPLACE INTO holiday_allowance_ledgers 
+                (year_month, staff_id, status, details, total_hours, confirmed_by, confirmed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                year_month,
+                parseInt(staff_id),
+                'locked',
+                detailsJson,
+                totalHours,
+                req.user.id,
+                confirmedAt
+            );
+            
+            db.prepare('INSERT INTO audit_logs (staff_id, action, details) VALUES (?, ?, ?)')
+                .run(req.user.id, 'lock_holiday_allowance_individual', `祝日手当確定 (職員ID: ${staff_id}, 月度: ${year_month})`);
+                
+        } else {
+            let query = `
+                SELECT s.id, s.platoon FROM staff s 
+                WHERE s.department_id = ? AND s.is_active = 1 AND s.platoon IN ('1bu', '2bu')
+            `;
+            let params = [req.user.department_id];
+            if (req.user.role === 'chief') {
+                query += ' AND s.station_id = ?';
+                params.push(req.user.station_id);
+            }
+            const staffList = db.prepare(query).all(...params);
+            
+            db.transaction(() => {
+                staffList.forEach(staff => {
+                    const existing = db.prepare('SELECT * FROM holiday_allowance_ledgers WHERE year_month = ? AND staff_id = ?').get(year_month, staff.id);
+                    let detailsJson, totalHours;
+                    
+                    if (existing) {
+                        detailsJson = typeof existing.details === 'string' ? existing.details : JSON.stringify(existing.details);
+                        totalHours = existing.total_hours;
+                    } else {
+                        const { details, totalHours: computedHours } = calculateHolidayAllowanceInternal(staff, year_month);
+                        detailsJson = JSON.stringify(details);
+                        totalHours = computedHours;
+                    }
+                    
+                    db.prepare(`
+                        INSERT OR REPLACE INTO holiday_allowance_ledgers 
+                        (year_month, staff_id, status, details, total_hours, confirmed_by, confirmed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    `).run(
+                        year_month,
+                        staff.id,
+                        'locked',
+                        detailsJson,
+                        totalHours,
+                        req.user.id,
+                        confirmedAt
+                    );
+                });
+            })();
+            
+            db.prepare('INSERT INTO audit_logs (staff_id, action, details) VALUES (?, ?, ?)')
+                .run(req.user.id, 'lock_holiday_allowance_bulk', `祝日手当一括確定 (月度: ${year_month})`);
+        }
+        
+        res.json({ message: '手当データを確定（ロック）しました。' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
+/**
+ * @route   POST /api/admin/holiday-allowance/unlock
+ * @desc    確定ロックの解除 (年月の全職員または単一職員の台帳レコード削除)
+ */
+router.post('/holiday-allowance/unlock', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
+    const { year_month, staff_id } = req.body;
+    
+    if (!year_month) {
+        return res.status(400).json({ error: '対象月度 (year_month) が必要です。' });
+    }
+    
+    try {
+        if (staff_id) {
+            db.prepare('DELETE FROM holiday_allowance_ledgers WHERE year_month = ? AND staff_id = ?').run(year_month, staff_id);
+            
+            db.prepare('INSERT INTO audit_logs (staff_id, action, details) VALUES (?, ?, ?)')
+                .run(req.user.id, 'unlock_holiday_allowance_individual', `祝日手当確定解除 (職員ID: ${staff_id}, 月度: ${year_month})`);
+        } else {
+            let query = `
+                SELECT s.id FROM staff s 
+                WHERE s.department_id = ? AND s.is_active = 1 AND s.platoon IN ('1bu', '2bu')
+            `;
+            let params = [req.user.department_id];
+            if (req.user.role === 'chief') {
+                query += ' AND s.station_id = ?';
+                params.push(req.user.station_id);
+            }
+            const staffList = db.prepare(query).all(...params);
+            
+            db.transaction(() => {
+                staffList.forEach(staff => {
+                    db.prepare('DELETE FROM holiday_allowance_ledgers WHERE year_month = ? AND staff_id = ?').run(year_month, staff.id);
+                });
+            })();
+            
+            db.prepare('INSERT INTO audit_logs (staff_id, action, details) VALUES (?, ?, ?)')
+                .run(req.user.id, 'unlock_holiday_allowance_bulk', `祝日手当一括確定解除 (月度: ${year_month})`);
+        }
+        
+        res.json({ message: '確定ロックを解除し、自動計算状態へリセットしました。' });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'サーバーエラーが発生しました。' });

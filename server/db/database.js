@@ -15,7 +15,8 @@ let dbData = {
     audit_logs: [],
     deployed_vehicles: [],
     vehicle_assignments: [],
-    schedule_staff_overrides: []
+    schedule_staff_overrides: [],
+    holiday_allowance_ledgers: []
 };
 
 // シードデータ（初期データ）
@@ -271,6 +272,12 @@ class Statement {
             return dbData.attendance_records.find(x => x.staff_id === params[0] && x.work_date === params[1]);
         }
 
+        // 9-2. 本日の車両配置アサインの取得
+        if (sql === "SELECT * FROM vehicle_assignments WHERE staff_id = ? AND work_date = ?") {
+            if (!dbData.vehicle_assignments) dbData.vehicle_assignments = [];
+            return dbData.vehicle_assignments.find(x => x.staff_id === params[0] && x.work_date === params[1]);
+        }
+
         // 10. 退勤打刻用の最新未退勤レコード取得
         if (sql.includes("SELECT * FROM attendance_records") && sql.includes("actual_clock_out IS NULL ORDER BY work_date DESC LIMIT 1")) {
             const records = dbData.attendance_records.filter(x => x.staff_id === params[0] && !x.actual_clock_out);
@@ -338,11 +345,11 @@ class Statement {
         }
 
         // 17. ダッシュボード用集計: 本日出勤中(working) or 本日退勤済(present)
-        if (sql.includes("FROM attendance_records ar JOIN staff s") && sql.includes("ar.status = ?")) {
+        if (sql.includes("FROM attendance_records ar JOIN staff s") && sql.includes("ar.status")) {
             const deptId = params[0];
             const workDate = params[1];
             // sqlからstatusを判定
-            const isWorking = sql.includes("status = 'working'");
+            const isWorking = sql.includes("status = 'working'") || (params[2] === 'working');
             const statusTarget = isWorking ? 'working' : 'present';
             
             let records = dbData.attendance_records.filter(x => x.work_date === workDate && x.status === statusTarget);
@@ -351,7 +358,7 @@ class Statement {
                 if (!s || s.department_id !== deptId || s.is_active !== 1) return false;
                 // station_idフィルタがあるか確認
                 if (sql.includes("AND s.station_id = ?")) {
-                    const idx = isWorking ? 2 : 2; // パラメータ位置
+                    const idx = 2; // params[0]: deptId, params[1]: workDate, params[2]: stationId
                     return s.station_id === params[idx];
                 }
                 return true;
@@ -393,6 +400,13 @@ class Statement {
             const nik_count = filtered.filter(x => x.shift_key === '日').length;
             
             return { tou_count, nik_count };
+        }
+
+        // 20. 祝日手当の単一取得
+        if (sql === "SELECT * FROM holiday_allowance_ledgers WHERE year_month = ? AND staff_id = ?") {
+            if (!dbData.holiday_allowance_ledgers) dbData.holiday_allowance_ledgers = [];
+            const staffId = parseInt(params[1], 10);
+            return dbData.holiday_allowance_ledgers.find(x => x.year_month === params[0] && parseInt(x.staff_id, 10) === staffId);
         }
 
         console.warn('[DB MOCK UNHANDLED GET] Returning empty. SQL:', sql);
@@ -569,6 +583,66 @@ class Statement {
                     const ids = match[1].split(',').map(x => parseInt(x.trim()));
                     result = result.filter(x => ids.includes(x.staff_id));
                 }
+            }
+            return result;
+        }
+
+        // 21. 祝日手当の月次一括取得
+        if (sql === "SELECT * FROM holiday_allowance_ledgers WHERE year_month = ?") {
+            if (!dbData.holiday_allowance_ledgers) dbData.holiday_allowance_ledgers = [];
+            return dbData.holiday_allowance_ledgers.filter(x => x.year_month === params[0]);
+        }
+
+        // 22. 休暇申請の取得 (特定職員・特定の期間)
+        if (sql.includes("FROM leave_requests") && sql.includes("staff_id = ?")) {
+            if (!dbData.leave_requests) dbData.leave_requests = [];
+            const staffId = parseInt(params[0]);
+            let result = dbData.leave_requests.filter(x => x.staff_id === staffId);
+            
+            if (sql.includes("status = 'approved'") || sql.includes('status = "approved"')) {
+                result = result.filter(x => x.status === 'approved');
+            }
+            
+            if (sql.includes("leave_type = 'weekly_off'") || sql.includes("leave_type = \"weekly_off\"")) {
+                result = result.filter(x => x.leave_type === 'weekly_off');
+            }
+            
+            if (sql.includes("start_date BETWEEN ? AND ?")) {
+                const start = params[1];
+                const end = params[2];
+                result = result.filter(x => x.start_date >= start && x.start_date <= end);
+            } else if (sql.includes("start_date <= ? AND end_date >= ?")) {
+                const start = params[1];
+                const end = params[2];
+                result = result.filter(x => x.start_date <= end && x.end_date >= start);
+            }
+            return result;
+        }
+
+        // 23. 全職員の特定期間 of 休暇申請取得 (起算日スライド用などの日付重なり)
+        if (sql.includes("FROM leave_requests") && sql.includes("start_date <= ? AND end_date >= ?")) {
+            if (!dbData.leave_requests) dbData.leave_requests = [];
+            const start = params[0];
+            const end = params[1];
+            let result = dbData.leave_requests.filter(x => x.start_date <= end && x.end_date >= start);
+            if (sql.includes("status = 'approved'") || sql.includes('status = "approved"')) {
+                result = result.filter(x => x.status === 'approved');
+            }
+            return result;
+        }
+
+        // 24. 全職員の特定期間の休暇申請取得 (BETWEEN指定)
+        if (sql.includes("FROM leave_requests") && sql.includes("start_date BETWEEN ? AND ?")) {
+            if (!dbData.leave_requests) dbData.leave_requests = [];
+            const start = params[0];
+            const end = params[1];
+            let result = dbData.leave_requests.filter(x => x.start_date >= start && x.start_date <= end);
+            
+            if (sql.includes("status = 'approved'") || sql.includes('status = "approved"')) {
+                result = result.filter(x => x.status === 'approved');
+            }
+            if (sql.includes("leave_type = 'weekly_off'") || sql.includes("leave_type = \"weekly_off\"")) {
+                result = result.filter(x => x.leave_type === 'weekly_off');
             }
             return result;
         }
@@ -1062,6 +1136,122 @@ class Statement {
                 });
                 changes = entries.length;
             }
+        }
+
+        // 祝日手当のインサート (ON CONFLICT時の処理も想定)
+        else if (sql.includes("INSERT INTO holiday_allowance_ledgers") || sql.includes("INSERT OR REPLACE INTO holiday_allowance_ledgers")) {
+            if (!dbData.holiday_allowance_ledgers) dbData.holiday_allowance_ledgers = [];
+            const year_month = params[0];
+            const staff_id = parseInt(params[1]);
+            const status = params[2];
+            const details = typeof params[3] === 'string' ? JSON.parse(params[3]) : params[3];
+            const total_hours = parseFloat(params[4]);
+            const confirmed_by = params[5] ? parseInt(params[5]) : null;
+            const confirmed_at = params[6] || null;
+
+            const idx = dbData.holiday_allowance_ledgers.findIndex(x => x.year_month === year_month && x.staff_id === staff_id);
+            if (idx !== -1) {
+                dbData.holiday_allowance_ledgers[idx].status = status;
+                dbData.holiday_allowance_ledgers[idx].details = details;
+                dbData.holiday_allowance_ledgers[idx].total_hours = total_hours;
+                dbData.holiday_allowance_ledgers[idx].confirmed_by = confirmed_by;
+                dbData.holiday_allowance_ledgers[idx].confirmed_at = confirmed_at;
+                lastInsertRowid = dbData.holiday_allowance_ledgers[idx].id;
+            } else {
+                const id = dbData.holiday_allowance_ledgers.length + 1;
+                dbData.holiday_allowance_ledgers.push({
+                    id,
+                    year_month,
+                    staff_id,
+                    status,
+                    details,
+                    total_hours,
+                    confirmed_by,
+                    confirmed_at
+                });
+                lastInsertRowid = id;
+            }
+            changes = 1;
+        }
+
+        // 祝日手当のアップデート
+        else if (sql.includes("UPDATE holiday_allowance_ledgers SET")) {
+            if (!dbData.holiday_allowance_ledgers) dbData.holiday_allowance_ledgers = [];
+            if (sql.includes("WHERE year_month = ? AND staff_id = ?")) {
+                const status = params[0];
+                const confirmed_by = params[1] ? parseInt(params[1]) : null;
+                const confirmed_at = params[2];
+                const year_month = params[3];
+                const staff_id = parseInt(params[4]);
+                
+                const entry = dbData.holiday_allowance_ledgers.find(x => x.year_month === year_month && x.staff_id === staff_id);
+                if (entry) {
+                    entry.status = status;
+                    entry.confirmed_by = confirmed_by;
+                    entry.confirmed_at = confirmed_at;
+                    changes = 1;
+                }
+            }
+        }
+
+        // 祝日手当の削除
+        else if (sql.includes("DELETE FROM holiday_allowance_ledgers")) {
+            if (!dbData.holiday_allowance_ledgers) dbData.holiday_allowance_ledgers = [];
+            if (sql.includes("WHERE year_month = ? AND staff_id = ?")) {
+                const year_month = params[0];
+                const staff_id = parseInt(params[1]);
+                const beforeLen = dbData.holiday_allowance_ledgers.length;
+                dbData.holiday_allowance_ledgers = dbData.holiday_allowance_ledgers.filter(
+                    x => !(x.year_month === year_month && x.staff_id === staff_id)
+                );
+                changes = beforeLen - dbData.holiday_allowance_ledgers.length;
+            }
+        }
+
+        // 休暇申請の削除 (週休希望の上書き削除用)
+        else if (sql.includes("DELETE FROM leave_requests")) {
+            if (!dbData.leave_requests) dbData.leave_requests = [];
+            if (sql.includes("WHERE staff_id = ? AND leave_type = 'weekly_off' AND start_date BETWEEN ? AND ?")) {
+                const staffId = parseInt(params[0]);
+                const start = params[1];
+                const end = params[2];
+                const beforeLen = dbData.leave_requests.length;
+                dbData.leave_requests = dbData.leave_requests.filter(
+                    x => !(x.staff_id === staffId && x.leave_type === 'weekly_off' && x.start_date >= start && x.start_date <= end)
+                );
+                changes = beforeLen - dbData.leave_requests.length;
+            }
+        }
+
+        // 休暇申請のインサート
+        else if (sql.includes("INSERT INTO leave_requests")) {
+            if (!dbData.leave_requests) dbData.leave_requests = [];
+            const id = dbData.leave_requests.length + 1;
+            
+            if (params.length === 5) {
+                dbData.leave_requests.push({
+                    id,
+                    staff_id: parseInt(params[0]),
+                    leave_type: params[1],
+                    start_date: params[2],
+                    end_date: params[3],
+                    status: params[4],
+                    created_at: new Date().toISOString()
+                });
+            } else {
+                dbData.leave_requests.push({
+                    id,
+                    staff_id: parseInt(params[0]),
+                    leave_type: params[1],
+                    start_date: params[2],
+                    end_date: params[3],
+                    reason: params[4] || null,
+                    status: params[5] || 'pending',
+                    created_at: new Date().toISOString()
+                });
+            }
+            lastInsertRowid = id;
+            changes = 1;
         }
 
         saveDatabase();

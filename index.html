@@ -688,9 +688,9 @@
             <!-- 期間指定用の入力欄 -->
             <div class="modal-range-selector" style="display: flex; align-items: center; gap: 8px; font-size: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 8px;">
                 <span>適用期間:</span>
-                <span id="modal-start-day-label" style="font-weight: 600;">-</span>日目
+                <span id="modal-start-day-label" style="font-weight: 600;">-</span>
                 <span>〜</span>
-                <input type="number" id="modal-end-day-input" class="form-control" min="1" max="28" style="width: 65px; padding: 4px 8px; height: 26px;" placeholder="当日">日目
+                <select id="modal-end-day-select" class="form-input" style="width: auto; padding: 2px 4px; height: 26px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);"></select>
             </div>
 
             <div id="modal-shift-buttons" class="modal-buttons" style="margin-bottom: 8px;">
@@ -725,7 +725,7 @@
     </div>
 
     <!-- スクリプトの読み込み -->
-    <script src="scheduler.js"></script>
-    <script src="app.js"></script>
+    <script src="scheduler.js?v=20260614"></script>
+    <script src="app.js?v=20260614"></script>
 </body>
 </html>

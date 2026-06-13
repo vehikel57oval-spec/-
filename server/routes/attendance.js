@@ -283,10 +283,16 @@ router.get('/today', verifyToken, (req, res) => {
         const schedule = db.prepare(
             'SELECT * FROM schedule_entries WHERE staff_id = ? AND work_date = ?'
         ).get(req.user.id, dateStr);
+
+        // 本日の車両配置（乗車割り当て）を取得
+        const vehicleAssignment = db.prepare(
+            'SELECT * FROM vehicle_assignments WHERE staff_id = ? AND work_date = ?'
+        ).get(req.user.id, dateStr);
         
         res.json({
             record: record || null,
-            schedule: schedule || null
+            schedule: schedule || null,
+            vehicleAssignment: vehicleAssignment || null
         });
     } catch (err) {
         console.error(err);
@@ -539,6 +545,122 @@ router.put('/:id/approve', verifyToken, requireRole('chief', 'admin', 'sysadmin'
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
+/**
+ * @route   POST /api/attendance/weekly-off
+ * @desc    週休希望の上書き登録 (一般職員用, 最大4日制限)
+ */
+router.post('/weekly-off', verifyToken, (req, res) => {
+    const { start_date, dates } = req.body;
+    if (!start_date || !Array.isArray(dates)) {
+        return res.status(400).json({ error: '起算日と日付リストを指定してください。' });
+    }
+    
+    // datesの件数制限（最大4件）
+    if (dates.length > 4) {
+        return res.status(400).json({ error: '週休希望日は最大4日までしか指定できません。' });
+    }
+    
+    // 日付の形式チェックと、start_dateから28日間の範囲内であるか
+    const start = new Date(start_date.replace(/-/g, '/'));
+    if (isNaN(start.getTime())) {
+        return res.status(400).json({ error: '不正な起算日フォーマットです。' });
+    }
+    
+    const end = new Date(start);
+    end.setDate(start.getDate() + 27);
+    
+    const yyyyStart = start.getFullYear();
+    const mmStart = String(start.getMonth() + 1).padStart(2, '0');
+    const ddStart = String(start.getDate()).padStart(2, '0');
+    const startDateStr = `${yyyyStart}-${mmStart}-${ddStart}`;
+    
+    const yyyyEnd = end.getFullYear();
+    const mmEnd = String(end.getMonth() + 1).padStart(2, '0');
+    const ddEnd = String(end.getDate()).padStart(2, '0');
+    const endDateStr = `${yyyyEnd}-${mmEnd}-${ddEnd}`;
+    
+    for (const dStr of dates) {
+        const d = new Date(dStr.replace(/-/g, '/'));
+        if (isNaN(d.getTime())) {
+            return res.status(400).json({ error: `不正な日付フォーマットです: ${dStr}` });
+        }
+        if (d < start || d > end) {
+            return res.status(400).json({ error: `日付 ${dStr} は指定サイクル（${startDateStr} 〜 ${endDateStr}）の範囲外です。` });
+        }
+    }
+    
+    try {
+        const staffId = req.user.id;
+        
+        // トランザクション処理
+        const tx = db.transaction(() => {
+            // 既存の週休希望の削除
+            db.prepare(`
+                DELETE FROM leave_requests 
+                WHERE staff_id = ? AND leave_type = 'weekly_off' AND start_date BETWEEN ? AND ?
+            `).run(staffId, startDateStr, endDateStr);
+            
+            // 新しい週休希望のインサート
+            dates.forEach(dStr => {
+                db.prepare(`
+                    INSERT INTO leave_requests (staff_id, leave_type, start_date, end_date, status)
+                    VALUES (?, ?, ?, ?, ?)
+                `).run(staffId, 'weekly_off', dStr, dStr, 'approved');
+            });
+        });
+        
+        tx();
+        
+        // ログ記録
+        db.prepare('INSERT INTO audit_logs (staff_id, action, details) VALUES (?, ?, ?)')
+            .run(staffId, 'register_weekly_off', `週休希望登録: サイクル起算日=${startDateStr}, 日数=${dates.length}`);
+            
+        res.json({ success: true, message: '週休希望を登録しました。' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: '週休希望の登録に失敗しました。' });
+    }
+});
+
+/**
+ * @route   GET /api/attendance/weekly-off
+ * @desc    週休希望の取得 (一般職員用)
+ */
+router.get('/weekly-off', verifyToken, (req, res) => {
+    const { start_date } = req.query;
+    if (!start_date) {
+        return res.status(400).json({ error: '起算日を指定してください。' });
+    }
+    
+    const start = new Date(start_date.replace(/-/g, '/'));
+    if (isNaN(start.getTime())) {
+        return res.status(400).json({ error: '不正な起算日フォーマットです。' });
+    }
+    
+    const end = new Date(start);
+    end.setDate(start.getDate() + 27);
+    
+    const startDateStr = start_date;
+    const yyyyEnd = end.getFullYear();
+    const mmEnd = String(end.getMonth() + 1).padStart(2, '0');
+    const ddEnd = String(end.getDate()).padStart(2, '0');
+    const endDateStr = `${yyyyEnd}-${mmEnd}-${ddEnd}`;
+    
+    try {
+        const staffId = req.user.id;
+        const list = db.prepare(`
+            SELECT * FROM leave_requests 
+            WHERE staff_id = ? AND leave_type = 'weekly_off' AND start_date BETWEEN ? AND ?
+        `).all(staffId, startDateStr, endDateStr);
+        
+        const dates = list.map(x => x.start_date);
+        res.json({ success: true, dates });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: '週休希望の取得に失敗しました。' });
     }
 });
 

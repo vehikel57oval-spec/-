@@ -62,7 +62,9 @@ router.post('/login', (req, res) => {
             department_name: staff.department_name,
             station_id: staff.station_id,
             station_name: staff.station_name,
-            platoon: staff.platoon
+            platoon: staff.platoon,
+            rank: staff.rank,
+            annual_leave_balance: staff.annual_leave_balance
         };
         
         // トークンの署名 (有効期限: 24時間)

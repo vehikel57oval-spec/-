@@ -617,10 +617,12 @@ function generateEmptyRoster() {
 
 // 余剰人員日への年休（有）自動割当ロジック
 function adjustSurplusLeaves(cycleNum) {
+    console.log(`=== adjustSurplusLeaves START (cycle: ${cycleNum}) ===`);
     const minStaff = state.minStaffing;
     const minSub = state.minSubOfficer;
     const minLarge = state.minLarge;
     const minPara = state.minParamedic;
+    console.log(`Settings - minStaff: ${minStaff}, minSub: ${minSub}, minLarge: ${minLarge}, minPara: ${minPara}`);
     
     // 各日（0〜27日）の余剰人員を調整するループ
     for (let d = 0; d < 28; d++) {
@@ -636,7 +638,11 @@ function adjustSurplusLeaves(cycleNum) {
         
         // 余剰がなければ次の日へ
         let surplus = onDutyStaff.length - minStaff;
-        if (surplus <= 0) continue;
+        if (surplus <= 0) {
+            continue;
+        }
+        
+        console.log(`Day ${d + 1}: On-duty count = ${onDutyStaff.length}, Surplus = ${surplus}`);
         
         // 職員ごとのこのサイクルの現時点での総休日数をカウント（公平性の基準にする）
         const holidayCounts = {};
@@ -656,6 +662,10 @@ function adjustSurplusLeaves(cycleNum) {
         while (surplus > 0) {
             let bestStaff = null;
             let maxScore = -999999;
+            let bestStaffFallback = null;
+            let maxScoreFallback = -999999;
+            
+            console.log(`  Attempting to assign annual leave. Current surplus = ${surplus}`);
             
             for (let i = 0; i < onDutyStaff.length; i++) {
                 const staff = onDutyStaff[i];
@@ -665,19 +675,34 @@ function adjustSurplusLeaves(cycleNum) {
                 const remaining = onDutyStaff.filter(s => s.id !== staff.id);
                 
                 // 1. 最低人員チェック
-                if (remaining.length < minStaff) continue;
+                if (remaining.length < minStaff) {
+                    console.log(`    [Skip] ${staff.name}: Remaining staff (${remaining.length}) < minStaff (${minStaff})`);
+                    continue;
+                }
                 
                 // 2. 司令補以上チェック
                 const subCount = remaining.filter(s => s.rank === "消防司令" || s.rank === "消防司令補").length;
-                if (subCount < minSub) continue;
+                const currentSubCount = onDutyStaff.filter(s => s.rank === "消防司令" || s.rank === "消防司令補").length;
+                if (subCount < minSub && subCount < currentSubCount) {
+                    console.log(`    [Skip] ${staff.name}: Sub-officers remaining (${subCount}) < minSub (${minSub}) and decreased`);
+                    continue;
+                }
                 
                 // 3. 大型免許チェック
                 const largeCount = remaining.filter(s => s.hasLargeLicense).length;
-                if (largeCount < minLarge) continue;
+                const currentLargeCount = onDutyStaff.filter(s => s.hasLargeLicense).length;
+                if (largeCount < minLarge && largeCount < currentLargeCount) {
+                    console.log(`    [Skip] ${staff.name}: Large license holders remaining (${largeCount}) < minLarge (${minLarge}) and decreased`);
+                    continue;
+                }
                 
                 // 4. 救命士チェック
                 const paraCount = remaining.filter(s => s.isParamedic).length;
-                if (paraCount < minPara) continue;
+                const currentParaCount = onDutyStaff.filter(s => s.isParamedic).length;
+                if (paraCount < minPara && paraCount < currentParaCount) {
+                    console.log(`    [Skip] ${staff.name}: Paramedics remaining (${paraCount}) < minPara (${minPara}) and decreased`);
+                    continue;
+                }
                 
                 // --- 制約条件2: 連休（週休・休暇隣接）回避チェック ---
                 // 週休「休」や他の休暇と隣接していないかをチェック（前後1つ分の当番日 = 2日前、2日後）
@@ -703,35 +728,42 @@ function adjustSurplusLeaves(cycleNum) {
                 
                 // スコア計算
                 // 基本スコア：総休日数が少ない職員を優先（公平性の担保）
-                let score = -holidayCounts[staff.id] * 100;
+                const baseScore = -holidayCounts[staff.id] * 100 + Math.random() * 5;
                 
-                // 連休回避の厳格化：隣接している場合は大きなペナルティを与える
-                if (isConsecutiveHoliday) {
-                    score -= 5000;
-                }
-                
-                // 軽微なランダム値を追加して均等化の偏りを防ぐ
-                score += Math.random() * 5;
-                
-                if (score > maxScore) {
-                    maxScore = score;
-                    bestStaff = staff;
+                if (!isConsecutiveHoliday) {
+                    if (baseScore > maxScore) {
+                        maxScore = baseScore;
+                        bestStaff = staff;
+                    }
+                } else {
+                    if (baseScore > maxScoreFallback) {
+                        maxScoreFallback = baseScore;
+                        bestStaffFallback = staff;
+                    }
                 }
             }
             
-            // 休暇を割り当てられる職員が誰もいない場合は当日の調整を中断
-            if (!bestStaff || maxScore < -4000) {
-                // ペナルティスコア（-5000以下）しかない場合は、連休回避制約を厳格に守るために割り当てをパスする
+            // 割り当てるべき職員の決定
+            let selectedStaff = null;
+            if (bestStaff) {
+                selectedStaff = bestStaff;
+            } else if (bestStaffFallback) {
+                // 連休回避できる職員がいない場合、連休にはなるが資格要件を満たす職員をフォールバックとして選択
+                selectedStaff = bestStaffFallback;
+            }
+            
+            if (!selectedStaff) {
+                // 資格要件を誰も満たせない場合は、これ以上この日の出勤人数を減らせないため中断
                 break;
             }
             
             // 休暇（年休）の割り当てを実行
-            const rosterKey = `${cycleNum}_${bestStaff.id}`;
+            const rosterKey = `${cycleNum}_${selectedStaff.id}`;
             state.roster[rosterKey][d] = '有'; // 設定にある年休キー
             
             // 状態の更新
-            onDutyStaff = onDutyStaff.filter(s => s.id !== bestStaff.id);
-            holidayCounts[bestStaff.id]++;
+            onDutyStaff = onDutyStaff.filter(s => s.id !== selectedStaff.id);
+            holidayCounts[selectedStaff.id]++;
             surplus--;
         }
     }
@@ -893,7 +925,7 @@ function handleDateChange() {
             const dateStr = `${optDate.getMonth()+1}/${optDate.getDate()}(${WEEKDAYS_JP[optDate.getDay()]})${holidayName ? '・' + holidayName : ''}`;
             const opt = document.createElement('option');
             opt.value = d;
-            opt.textContent = `${d + 1}日目 (${dateStr})`;
+            opt.textContent = dateStr;
             regenSelect.appendChild(opt);
         }
         if (currentVal !== "" && parseInt(currentVal) < 28) {
@@ -916,7 +948,12 @@ function updateGenerateButtonText() {
     if (val === 0) {
         btnText.textContent = "勤務表を自動生成";
     } else {
-        btnText.textContent = `${val + 1}日目以降を再編成 (部分的再生成)`;
+        const activeStartDate = new Date(state.startDate);
+        activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
+        const regenDate = new Date(activeStartDate);
+        regenDate.setDate(activeStartDate.getDate() + val);
+        const dateLabel = `${regenDate.getMonth() + 1}/${regenDate.getDate()}`;
+        btnText.textContent = `${dateLabel} 以降を再編成 (部分的再生成)`;
     }
 }
 
@@ -1293,7 +1330,16 @@ function bindEvents() {
                     
                     let msg = res.profileMessage;
                     if (regenStartDay > 0) {
-                        msg = `【部分的再生成完了】${regenStartDay + 1}日目以降を再編成しました（1〜${regenStartDay}日目は固定）。\n\n` + msg;
+                        const activeStartDate = new Date(state.startDate);
+                        activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
+                        const regenStartValDate = new Date(activeStartDate);
+                        regenStartValDate.setDate(activeStartDate.getDate() + regenStartDay);
+                        const regenPrevValDate = new Date(activeStartDate);
+                        regenPrevValDate.setDate(activeStartDate.getDate() + regenStartDay - 1);
+                        const startLabel = `${activeStartDate.getMonth() + 1}/${activeStartDate.getDate()}`;
+                        const prevLabel = `${regenPrevValDate.getMonth() + 1}/${regenPrevValDate.getDate()}`;
+                        const regenLabel = `${regenStartValDate.getMonth() + 1}/${regenStartValDate.getDate()}`;
+                        msg = `【部分的再生成完了】${regenLabel}以降を再編成しました（${startLabel}〜${prevLabel}は固定）。\n\n` + msg;
                     }
                     await showCustomAlert(msg);
                 } else {
@@ -1650,7 +1696,9 @@ function refreshUI() {
         });
     }
 
-    state.warnings = validateRoster(activeRoster, state.staffList, state.minStaffing, prevRoster);
+    const activeStartDate = new Date(state.startDate);
+    activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
+    state.warnings = validateRoster(activeRoster, state.staffList, state.minStaffing, prevRoster, state.minSubOfficer, state.minLarge, state.minParamedic, activeStartDate);
     renderWarnings();
     
     // アクティブなタブに合わせて描画
@@ -2530,9 +2578,26 @@ function showShiftModal(staffId, staffName, dayIndex, isPreScheduling = false) {
     const titlePrefix = isPreScheduling ? "事前指定シフトの設定" : "シフト変更";
     document.getElementById('modal-title').textContent = `${staffName} の${titlePrefix} - ${dateStr}`;
     
-    // 開始日のラベル設定と、終了日入力欄のリセット
-    document.getElementById('modal-start-day-label').textContent = dayIndex + 1;
-    document.getElementById('modal-end-day-input').value = '';
+    // 開始日のラベル設定 (月日で表示)
+    const startDayStr = `${date.getMonth()+1}/${date.getDate()}(${WEEKDAYS_JP[date.getDay()]})`;
+    document.getElementById('modal-start-day-label').textContent = startDayStr;
+    
+    // 終了日選択肢を動的に生成
+    const endSelect = document.getElementById('modal-end-day-select');
+    endSelect.innerHTML = '';
+    for (let d = dayIndex; d < 28; d++) {
+        const endDayDate = new Date(activeStartDate);
+        endDayDate.setDate(activeStartDate.getDate() + d);
+        const endHolidayName = getJapaneseHoliday(endDayDate);
+        const endDayStr = `${endDayDate.getMonth()+1}/${endDayDate.getDate()}(${WEEKDAYS_JP[endDayDate.getDay()]})${endHolidayName ? '・' + endHolidayName : ''}`;
+        
+        const opt = document.createElement('option');
+        opt.value = d + 1; // 1-indexed for compatibility
+        opt.textContent = endDayStr;
+        endSelect.appendChild(opt);
+    }
+    // デフォルトは当日 (dayIndex + 1)
+    endSelect.value = dayIndex + 1;
     
     const modal = document.getElementById('shift-modal');
     modal.style.display = 'flex';
@@ -2547,7 +2612,7 @@ function showShiftModal(staffId, staffName, dayIndex, isPreScheduling = false) {
     // 期間計算ヘルパー関数
     function getTargetRange() {
         const startDay = dayIndex;
-        let endDay = parseInt(document.getElementById('modal-end-day-input').value) - 1;
+        let endDay = parseInt(document.getElementById('modal-end-day-select').value) - 1;
         if (isNaN(endDay) || endDay < startDay) {
             endDay = startDay;
         }

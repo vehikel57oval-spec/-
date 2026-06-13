@@ -312,12 +312,41 @@ router.get('/roster', verifyToken, (req, res) => {
             mappedAssignments[a.work_date][a.vehicle_name][a.role_name] = a.staff_id.toString();
         });
 
+        // 5. 週休希望（leave_requestsのweekly_offかつapprovedのもの）を取得してhopeShiftsにマッピング
+        const cycleNum = parseInt(req.query.cycle_number) || 1;
+        const leaves = db.prepare(`
+            SELECT * FROM leave_requests 
+            WHERE status = 'approved' AND leave_type = 'weekly_off' AND start_date BETWEEN ? AND ?
+        `).all(startDateStr, endDateStr);
+
+        const hopeShifts = {};
+        mappedStaff.forEach(s => {
+            hopeShifts[`${cycleNum}_${s.id}`] = {};
+        });
+
+        leaves.forEach(lr => {
+            const key = `${cycleNum}_${lr.staff_id}`;
+            if (!hopeShifts[key]) {
+                hopeShifts[key] = {};
+            }
+            
+            const start = new Date(startDateStr.replace(/-/g, '/'));
+            const target = new Date(lr.start_date.replace(/-/g, '/'));
+            const diffTime = target - start;
+            const dayIndex = Math.round(diffTime / (1000 * 60 * 60 * 24));
+            
+            if (dayIndex >= 0 && dayIndex < 28) {
+                hopeShifts[key][dayIndex] = '休';
+            }
+        });
+
         res.json({
             success: true,
             staff: mappedStaff,
             scheduleEntries,
             deployedVehicles,
-            vehicleAssignments: mappedAssignments
+            vehicleAssignments: mappedAssignments,
+            hopeShifts: hopeShifts
         });
     } catch (err) {
         console.error(err);

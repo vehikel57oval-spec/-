@@ -315,6 +315,9 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11, minS
             // 2. 長期出張・病休など事前指定が多すぎて適合パターンが0個になった場合の救済策
             if (filtered.length === 0) {
                 const fallbackSeq = new Array(14).fill(0);
+                let holidayBlocksCount = 0;
+                
+                // まず希望のあるブロックを休み(1)にする
                 for (let k = 0; k < 14; k++) {
                     const day1 = staff.platoon === 1 ? 2 * k : 2 * k + 1;
                     const day2 = staff.platoon === 1 ? 2 * k + 1 : (2 * k + 2) % 28;
@@ -322,11 +325,79 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11, minS
                     const hope1 = staffHopes[day1];
                     const hope2 = staffHopes[day2];
                     
-                    // どちらか一方が休み系ならそのブロックは休み(1)とし、それ以外は当番(0)とする
                     if (isHolidayType(hope1) || isHolidayType(hope2)) {
                         fallbackSeq[k] = 1;
-                    } else {
-                        fallbackSeq[k] = 0;
+                        holidayBlocksCount++;
+                    }
+                }
+                
+                // 週休ブロック数が4未満の場合、4になるまで他のブロックを休み(1)にして補完する
+                if (holidayBlocksCount < 4) {
+                    const needed = 4 - holidayBlocksCount;
+                    let added = 0;
+                    
+                    // 優先度1: すでに休み（1）になっているブロックに隣接せず（循環も考慮）、かつ希望に当務系統が指定されていない空きブロック
+                    for (let k = 0; k < 14; k++) {
+                        if (fallbackSeq[k] === 0) {
+                            const prevK = (k - 1 + 14) % 14;
+                            const nextK = (k + 1) % 14;
+                            if (fallbackSeq[prevK] === 0 && fallbackSeq[nextK] === 0) {
+                                const day1 = staff.platoon === 1 ? 2 * k : 2 * k + 1;
+                                const day2 = staff.platoon === 1 ? 2 * k + 1 : (2 * k + 2) % 28;
+                                const hope1 = staffHopes[day1];
+                                const hope2 = staffHopes[day2];
+                                
+                                if (!isDutyType(hope1) && !isDutyType(hope2)) {
+                                    fallbackSeq[k] = 1;
+                                    added++;
+                                    if (added === needed) break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 優先度2: すでに休み（1）になっているブロックに隣接はするが、希望に当務系統が指定されていない空きブロック
+                    if (added < needed) {
+                        for (let k = 0; k < 14; k++) {
+                            if (fallbackSeq[k] === 0) {
+                                const day1 = staff.platoon === 1 ? 2 * k : 2 * k + 1;
+                                const day2 = staff.platoon === 1 ? 2 * k + 1 : (2 * k + 2) % 28;
+                                const hope1 = staffHopes[day1];
+                                const hope2 = staffHopes[day2];
+                                
+                                if (!isDutyType(hope1) && !isDutyType(hope2)) {
+                                    fallbackSeq[k] = 1;
+                                    added++;
+                                    if (added === needed) break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 優先度3: 強制的に隣接しない空きブロック
+                    if (added < needed) {
+                        for (let k = 0; k < 14; k++) {
+                            if (fallbackSeq[k] === 0) {
+                                const prevK = (k - 1 + 14) % 14;
+                                const nextK = (k + 1) % 14;
+                                if (fallbackSeq[prevK] === 0 && fallbackSeq[nextK] === 0) {
+                                    fallbackSeq[k] = 1;
+                                    added++;
+                                    if (added === needed) break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 優先度4: 強制的に空いている任意のブロック
+                    if (added < needed) {
+                        for (let k = 0; k < 14; k++) {
+                            if (fallbackSeq[k] === 0) {
+                                fallbackSeq[k] = 1;
+                                added++;
+                                if (added === needed) break;
+                            }
+                        }
                     }
                 }
                 filtered = [fallbackSeq];
@@ -486,10 +557,19 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11, minS
  * @param {number} minStaffing 最低確保人員
  * @returns {Array} 警告オブジェクトの配列
  */
-function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, minSubOfficer = 1, minLarge = 1, minParamedic = 1) {
+function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, minSubOfficer = 1, minLarge = 1, minParamedic = 1, startDate = null) {
     const warnings = [];
     const staffMap = {};
     staffList.forEach(s => { staffMap[s.id] = s; });
+
+    const getDayLabel = (dIndex) => {
+        if (startDate) {
+            const date = new Date(startDate);
+            date.setDate(date.getDate() + dIndex);
+            return `${date.getMonth() + 1}/${date.getDate()}`;
+        }
+        return `${dIndex + 1}日目`;
+    };
 
     // 各資格の総登録数（小隊別）をカウントし、警告時の目標値を動的に調整
     const getPlatoonTarget = (platoonNum, prop, userMin = 2) => {
@@ -527,7 +607,7 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, 
                     staffId: staffId,
                     staffName: staff.name,
                     dayIndex: d,
-                    message: `${staff.name}：${d + 1}日目と${(d + 1) % 28 + 1}日目に24時間連続勤務（当が連続）が発生しています。`
+                    message: `${staff.name}：${getDayLabel(d)}と${getDayLabel((d + 1) % 28)}に24時間連続勤務（当が連続）が発生しています。`
                 });
             }
         }
@@ -646,7 +726,7 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, 
             warnings.push({
                 type: 'min_staffing',
                 dayIndex: d,
-                message: `${d + 1}日目：当番の出勤人数が ${dutyOnDay} 名です。最低確保人員（${minStaffing}名）を満たしていません。`
+                message: `${getDayLabel(d)}：当番の出勤人数が ${dutyOnDay} 名です。最低確保人員（${minStaffing}名）を満たしていません。`
             });
         }
         
@@ -661,35 +741,35 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, 
             warnings.push({
                 type: 'balance_subofficer',
                 dayIndex: d,
-                message: `${d + 1}日目：当番（第${activePlatoonNum}小隊）の司令・司令補が ${subOfficersOnDuty} 名です。${targetSubOfficers}名必要です。`
+                message: `${getDayLabel(d)}：当番（第${activePlatoonNum}小隊）の司令・司令補が ${subOfficersOnDuty} 名です。${targetSubOfficers}名必要です。`
             });
         }
         if (officersOnDuty < targetOfficers) {
             warnings.push({
                 type: 'balance_officer',
                 dayIndex: d,
-                message: `${d + 1}日目：当番（第${activePlatoonNum}小隊）の幹部（士長以上）が ${officersOnDuty} 名です。${targetOfficers}名必要です。`
+                message: `${getDayLabel(d)}：当番（第${activePlatoonNum}小隊）の幹部（士長以上）が ${officersOnDuty} 名です。${targetOfficers}名必要です。`
             });
         }
         if (largeOnDuty < targetLarge) {
             warnings.push({
                 type: 'balance_large',
                 dayIndex: d,
-                message: `${d + 1}日目：当番（第${activePlatoonNum}小隊）の大型免許保有者が ${largeOnDuty} 名です。${targetLarge}名必要です。`
+                message: `${getDayLabel(d)}：当番（第${activePlatoonNum}小隊）の大型免許保有者が ${largeOnDuty} 名です。${targetLarge}名必要です。`
             });
         }
         if (paramedicsOnDuty < targetParamedics) {
             warnings.push({
                 type: 'balance_paramedic',
                 dayIndex: d,
-                message: `${d + 1}日目：当番（第${activePlatoonNum}小隊）の救命士が ${paramedicsOnDuty} 名です。${targetParamedics}名必要です。`
+                message: `${getDayLabel(d)}：当番（第${activePlatoonNum}小隊）の救命士が ${paramedicsOnDuty} 名です。${targetParamedics}名必要です。`
             });
         }
         if (rescueOnDuty < targetRescue) {
             warnings.push({
                 type: 'balance_rescue',
                 dayIndex: d,
-                message: `${d + 1}日目：当番（第${activePlatoonNum}小隊）の救助隊員が ${rescueOnDuty} 名です。${targetRescue}名必要です。`
+                message: `${getDayLabel(d)}：当番（第${activePlatoonNum}小隊）の救助隊員が ${rescueOnDuty} 名です。${targetRescue}名必要です。`
             });
         }
     }

@@ -450,7 +450,7 @@ function updateStationTitle() {
 // API経由での勤務データ読み込み
 async function loadDataFromAPI() {
     try {
-        const url = `/api/schedule/roster?station_id=${state.stationId}&start_date=${state.startDate}`;
+        const url = `/api/schedule/roster?station_id=${state.stationId}&start_date=${state.startDate}&cycle_number=${state.activeCycle}`;
         const response = await fetch(url, {
             headers: { 'Authorization': `Bearer ${Auth.token}` }
         });
@@ -466,14 +466,17 @@ async function loadDataFromAPI() {
         state.vehicleAssignments = data.vehicleAssignments || {};
         
         state.roster = {};
-        state.hopeShifts = {};
+        state.hopeShifts = data.hopeShifts || {};
         state.hourlyLeaves = {};
         state.isConfirmed = false;
 
         // 空データの初期化
         state.staffList.forEach(s => {
-            state.roster[`${state.activeCycle}_${s.id}`] = new Array(28).fill('-');
-            state.hopeShifts[`${state.activeCycle}_${s.id}`] = {};
+            const key = `${state.activeCycle}_${s.id}`;
+            state.roster[key] = new Array(28).fill('-');
+            if (!state.hopeShifts[key]) {
+                state.hopeShifts[key] = {};
+            }
         });
 
         const start = new Date(state.startDate.replace(/-/g, '/'));
@@ -883,7 +886,265 @@ async function render(container) {
 
                         <div class="card-sub" style="padding: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
                             <h3 style="font-size: 14px; margin-bottom: 12px;">3. 乗車割り当て</h3>
-                            <div id="vehicle-slots-wrapper" class="vehicle-slots-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;"></div>
+                            <div id="vehicle-slots-wrapper" class="vehicle-slots-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;">
+                                <!-- 指揮車 -->
+                                <div class="vehicle-card" data-vehicle="指揮車" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                    <div class="vehicle-card-header" style="background: #4f46e5; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                        <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">指揮車</h4>
+                                        <span class="vehicle-status-badge" data-vehicle="指揮車" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                    </div>
+                                    <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="指揮車" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="指揮車" data-role="隊員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- タンク車 -->
+                                <div class="vehicle-card" data-vehicle="タンク車" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                    <div class="vehicle-card-header" style="background: #0284c7; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                        <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">タンク車</h4>
+                                        <span class="vehicle-status-badge" data-vehicle="タンク車" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                    </div>
+                                    <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="タンク車" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="タンク車" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員1</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="タンク車" data-role="隊員1" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員2</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="タンク車" data-role="隊員2" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 救急車1 -->
+                                <div class="vehicle-card" data-vehicle="救急車1" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                    <div class="vehicle-card-header" style="background: #db2777; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                        <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">救急車1</h4>
+                                        <span class="vehicle-status-badge" data-vehicle="救急車1" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                    </div>
+                                    <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="救急車1" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #2563eb;">救命士 (救)</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="救急車1" data-role="救命士" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="救急車1" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 救急車2 -->
+                                <div class="vehicle-card" data-vehicle="救急車2" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                    <div class="vehicle-card-header" style="background: #be185d; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                        <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">救急車2</h4>
+                                        <span class="vehicle-status-badge" data-vehicle="救急車2" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                    </div>
+                                    <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="救急車2" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #2563eb;">救命士 (救)</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="救急車2" data-role="救命士" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="救急車2" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 救助工作車 -->
+                                <div class="vehicle-card" data-vehicle="救助工作車" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                    <div class="vehicle-card-header" style="background: #ea580c; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                        <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">救助工作車</h4>
+                                        <span class="vehicle-status-badge" data-vehicle="救助工作車" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                    </div>
+                                    <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="救助工作車" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="救助工作車" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #ea580c;">隊員1 (R)</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="救助工作車" data-role="隊員1" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #ea580c;">隊員2 (R)</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="救助工作車" data-role="隊員2" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- はしご車 -->
+                                <div class="vehicle-card" data-vehicle="はしご車" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                    <div class="vehicle-card-header" style="background: #dc2626; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                        <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">はしご車</h4>
+                                        <span class="vehicle-status-badge" data-vehicle="はしご車" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                    </div>
+                                    <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="はしご車" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="はしご車" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="はしご車" data-role="隊員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 拠点機能車 -->
+                                <div class="vehicle-card" data-vehicle="拠点機能車" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                    <div class="vehicle-card-header" style="background: #0d9488; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                        <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">拠点機能車</h4>
+                                        <span class="vehicle-status-badge" data-vehicle="拠点機能車" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                    </div>
+                                    <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="拠点機能車" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="拠点機能車" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="拠点機能車" data-role="隊員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 予備車 -->
+                                <div class="vehicle-card" data-vehicle="予備車" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                    <div class="vehicle-card-header" style="background: #4b5563; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                        <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">予備車</h4>
+                                        <span class="vehicle-status-badge" data-vehicle="予備車" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                    </div>
+                                    <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="予備車" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="予備車" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="予備車" data-role="隊員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 卓上通信 -->
+                                <div class="vehicle-card" data-vehicle="卓上通信" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);">
+                                    <div class="vehicle-card-header" style="background: #7c3aed; color: #ffffff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                                        <h4 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;">卓上通信</h4>
+                                        <span class="vehicle-status-badge" data-vehicle="卓上通信" style="font-size: 10px; font-weight: bold; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 10px;">OK</span>
+                                    </div>
+                                    <div class="vehicle-slots" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊長</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="卓上通信" data-role="隊長" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0; color: #dc2626;">機関員 (機)</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="卓上通信" data-role="機関員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                        <div class="slot-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                            <label style="font-size: 12px; font-weight: 600; width: 80px; margin: 0;">隊員</label>
+                                            <select class="form-control vehicle-slot-select" data-vehicle="卓上通信" data-role="隊員" style="flex: 1; height: 28px; padding: 2px 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                                <option value="">-- 未指定 --</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -901,9 +1162,9 @@ async function render(container) {
                 
                 <div class="modal-range-selector" style="display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 12px;">
                     <span>適用期間:</span>
-                    <span id="modal-start-day-label" style="font-weight: 600;">-</span>日目
+                    <span id="modal-start-day-label" style="font-weight: 600;">-</span>
                     <span>〜</span>
-                    <input type="number" id="modal-end-day-input" class="form-control" min="1" max="28" style="width: 65px; padding: 4px 8px; height: 26px; font-size: 12px;" placeholder="当日">日目
+                    <select id="modal-end-day-select" class="form-input" style="width: auto; padding: 2px 4px; height: 26px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);"></select>
                 </div>
 
                 <div id="modal-shift-buttons" class="modal-buttons" style="margin-bottom: 12px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
@@ -1132,11 +1393,14 @@ function generateEmptyRoster() {
 }
 
 // 余剰人員日への年休（有）自動割当ロジック
+// 余剰人員日への年休（有）自動割当ロジック
 function adjustSurplusLeaves(cycleNum) {
+    console.log(`=== adjustSurplusLeaves START (cycle: ${cycleNum}) ===`);
     const minStaff = state.minStaffing;
     const minSub = state.minSubOfficer;
     const minLarge = state.minLarge;
     const minPara = state.minParamedic;
+    console.log(`Settings - minStaff: ${minStaff}, minSub: ${minSub}, minLarge: ${minLarge}, minPara: ${minPara}`);
     
     // 各日（0〜27日）の余剰人員を調整するループ
     for (let d = 0; d < 28; d++) {
@@ -1152,7 +1416,11 @@ function adjustSurplusLeaves(cycleNum) {
         
         // 余剰がなければ次の日へ
         let surplus = onDutyStaff.length - minStaff;
-        if (surplus <= 0) continue;
+        if (surplus <= 0) {
+            continue;
+        }
+        
+        console.log(`Day ${d + 1}: On-duty count = ${onDutyStaff.length}, Surplus = ${surplus}`);
         
         // 職員ごとのこのサイクルの現時点での総休日数をカウント（公平性の基準にする）
         const holidayCounts = {};
@@ -1172,6 +1440,10 @@ function adjustSurplusLeaves(cycleNum) {
         while (surplus > 0) {
             let bestStaff = null;
             let maxScore = -999999;
+            let bestStaffFallback = null;
+            let maxScoreFallback = -999999;
+            
+            console.log(`  Attempting to assign annual leave. Current surplus = ${surplus}`);
             
             for (let i = 0; i < onDutyStaff.length; i++) {
                 const staff = onDutyStaff[i];
@@ -1181,19 +1453,34 @@ function adjustSurplusLeaves(cycleNum) {
                 const remaining = onDutyStaff.filter(s => s.id !== staff.id);
                 
                 // 1. 最低人員チェック
-                if (remaining.length < minStaff) continue;
+                if (remaining.length < minStaff) {
+                    console.log(`    [Skip] ${staff.name}: Remaining staff (${remaining.length}) < minStaff (${minStaff})`);
+                    continue;
+                }
                 
                 // 2. 司令補以上チェック
                 const subCount = remaining.filter(s => s.rank === "消防司令" || s.rank === "消防司令補").length;
-                if (subCount < minSub) continue;
+                const currentSubCount = onDutyStaff.filter(s => s.rank === "消防司令" || s.rank === "消防司令補").length;
+                if (subCount < minSub && subCount < currentSubCount) {
+                    console.log(`    [Skip] ${staff.name}: Sub-officers remaining (${subCount}) < minSub (${minSub}) and decreased`);
+                    continue;
+                }
                 
                 // 3. 大型免許チェック
                 const largeCount = remaining.filter(s => s.hasLargeLicense).length;
-                if (largeCount < minLarge) continue;
+                const currentLargeCount = onDutyStaff.filter(s => s.hasLargeLicense).length;
+                if (largeCount < minLarge && largeCount < currentLargeCount) {
+                    console.log(`    [Skip] ${staff.name}: Large license holders remaining (${largeCount}) < minLarge (${minLarge}) and decreased`);
+                    continue;
+                }
                 
                 // 4. 救命士チェック
                 const paraCount = remaining.filter(s => s.isParamedic).length;
-                if (paraCount < minPara) continue;
+                const currentParaCount = onDutyStaff.filter(s => s.isParamedic).length;
+                if (paraCount < minPara && paraCount < currentParaCount) {
+                    console.log(`    [Skip] ${staff.name}: Paramedics remaining (${paraCount}) < minPara (${minPara}) and decreased`);
+                    continue;
+                }
                 
                 // --- 制約条件2: 連休（週休・休暇隣接）回避チェック ---
                 // 週休「休」や他の休暇と隣接していないかをチェック（前後1つ分の当番日 = 2日前、2日後）
@@ -1219,38 +1506,47 @@ function adjustSurplusLeaves(cycleNum) {
                 
                 // スコア計算
                 // 基本スコア：総休日数が少ない職員を優先（公平性の担保）
-                let score = -holidayCounts[staff.id] * 100;
+                const baseScore = -holidayCounts[staff.id] * 100 + Math.random() * 5;
                 
-                // 連休回避の厳格化：隣接している場合は大きなペナルティを与える
-                if (isConsecutiveHoliday) {
-                    score -= 5000;
-                }
-                
-                // 軽微なランダム値を追加して均等化の偏りを防ぐ
-                score += Math.random() * 5;
-                
-                if (score > maxScore) {
-                    maxScore = score;
-                    bestStaff = staff;
+                if (!isConsecutiveHoliday) {
+                    if (baseScore > maxScore) {
+                        maxScore = baseScore;
+                        bestStaff = staff;
+                    }
+                } else {
+                    if (baseScore > maxScoreFallback) {
+                        maxScoreFallback = baseScore;
+                        bestStaffFallback = staff;
+                    }
                 }
             }
             
-            // 休暇を割り当てられる職員が誰もいない場合は当日の調整を中断
-            if (!bestStaff || maxScore < -4000) {
-                // ペナルティスコア（-5000以下）しかない場合は、連休回避制約を厳格に守るために割り当てをパスする
+            // 割り当てるべき職員の決定
+            let selectedStaff = null;
+            if (bestStaff) {
+                selectedStaff = bestStaff;
+                console.log(`    [Select] Selected ${selectedStaff.name} (Consecutive holiday avoided)`);
+            } else if (bestStaffFallback) {
+                selectedStaff = bestStaffFallback;
+                console.log(`    [Select Fallback] Selected ${selectedStaff.name} (Consecutive holiday allowed as fallback)`);
+            }
+            
+            if (!selectedStaff) {
+                console.log(`    [Stop] No eligible staff found to reduce for Day ${d + 1}`);
                 break;
             }
             
             // 休暇（年休）の割り当てを実行
-            const rosterKey = `${cycleNum}_${bestStaff.id}`;
+            const rosterKey = `${cycleNum}_${selectedStaff.id}`;
             state.roster[rosterKey][d] = '有'; // 設定にある年休キー
             
             // 状態の更新
-            onDutyStaff = onDutyStaff.filter(s => s.id !== bestStaff.id);
-            holidayCounts[bestStaff.id]++;
+            onDutyStaff = onDutyStaff.filter(s => s.id !== selectedStaff.id);
+            holidayCounts[selectedStaff.id]++;
             surplus--;
         }
     }
+    console.log(`=== adjustSurplusLeaves END ===`);
 }
 
 // 階級・資格の短縮名取得
@@ -1393,8 +1689,10 @@ function handleDateChange() {
     // UI表示更新
     const format = (d) => `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
     const rangeText = `${format(activeStartDate)} 〜 ${format(activeEndDate)}`;
-    document.getElementById('label-cycle-range').textContent = rangeText;
-    document.getElementById('print-date-range').textContent = rangeText;
+    const labelRange = document.getElementById('label-cycle-range');
+    if (labelRange) labelRange.textContent = rangeText;
+    const printRange = document.getElementById('print-date-range');
+    if (printRange) printRange.textContent = rangeText;
     
     // 再生成開始日の選択肢を動的に生成
     const regenSelect = document.getElementById('select-regen-start-day');
@@ -1408,7 +1706,7 @@ function handleDateChange() {
             const dateStr = `${optDate.getMonth()+1}/${optDate.getDate()}(${WEEKDAYS_JP[optDate.getDay()]})${holidayName ? '・' + holidayName : ''}`;
             const opt = document.createElement('option');
             opt.value = d;
-            opt.textContent = `${d + 1}日目 (${dateStr})`;
+            opt.textContent = dateStr;
             regenSelect.appendChild(opt);
         }
         if (currentVal !== "" && parseInt(currentVal) < 28) {
@@ -1431,7 +1729,12 @@ function updateGenerateButtonText() {
     if (val === 0) {
         btnText.textContent = "勤務表を自動生成";
     } else {
-        btnText.textContent = `${val + 1}日目以降を再編成 (部分的再生成)`;
+        const activeStartDate = new Date(state.startDate);
+        activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
+        const regenDate = new Date(activeStartDate);
+        regenDate.setDate(activeStartDate.getDate() + val);
+        const dateLabel = `${regenDate.getMonth() + 1}/${regenDate.getDate()}`;
+        btnText.textContent = `${dateLabel} 以降を再編成 (部分的再生成)`;
     }
 }
 
@@ -1822,7 +2125,16 @@ function bindEvents() {
                     
                     let msg = res.profileMessage;
                     if (regenStartDay > 0) {
-                        msg = `【部分的再生成完了】${regenStartDay + 1}日目以降を再編成しました（1〜${regenStartDay}日目は固定）。\n\n` + msg;
+                        const activeStartDate = new Date(state.startDate);
+                        activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
+                        const regenStartValDate = new Date(activeStartDate);
+                        regenStartValDate.setDate(activeStartDate.getDate() + regenStartDay);
+                        const regenPrevValDate = new Date(activeStartDate);
+                        regenPrevValDate.setDate(activeStartDate.getDate() + regenStartDay - 1);
+                        const startLabel = `${activeStartDate.getMonth() + 1}/${activeStartDate.getDate()}`;
+                        const prevLabel = `${regenPrevValDate.getMonth() + 1}/${regenPrevValDate.getDate()}`;
+                        const regenLabel = `${regenStartValDate.getMonth() + 1}/${regenStartValDate.getDate()}`;
+                        msg = `【部分的再生成完了】${regenLabel}以降を再編成しました（${startLabel}〜${prevLabel}は固定）。\n\n` + msg;
                     }
                     await showCustomAlert(msg);
                 } else {
@@ -2205,7 +2517,9 @@ function refreshUI() {
         });
     }
 
-    state.warnings = validateRoster(activeRoster, state.staffList, state.minStaffing, prevRoster);
+    const activeStartDate = new Date(state.startDate);
+    activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
+    state.warnings = validateRoster(activeRoster, state.staffList, state.minStaffing, prevRoster, state.minSubOfficer, state.minLarge, state.minParamedic, activeStartDate);
     renderWarnings();
     
     // アクティブなタブに合わせて描画
@@ -2730,6 +3044,18 @@ function renderHopeTable() {
         const tbody = document.createElement('tbody');
         
         const platoonStaff = sortStaffByRank(state.staffList.filter(s => s.platoon === platoonNum));
+        
+        // 各日の週休希望の人数を集計
+        const dailyOffCount = new Array(28).fill(0);
+        platoonStaff.forEach(staff => {
+            const key = `${state.activeCycle}_${staff.id}`;
+            const staffHopes = state.hopeShifts[key] || {};
+            for (let d = 0; d < 28; d++) {
+                if (staffHopes[d] === '休') {
+                    dailyOffCount[d]++;
+                }
+            }
+        });
             
         platoonStaff.forEach(staff => {
             const tr = document.createElement('tr');
@@ -2777,6 +3103,28 @@ function renderHopeTable() {
                             timeDiv.textContent = `${savedHourly.hours}h`;
                             td.appendChild(timeDiv);
                         }
+                    }
+                    
+                    // 週休希望が重複（2名以上）している場合のハイライト警告
+                    if (shift === '休' && dailyOffCount[d] > 1) {
+                        td.style.background = 'rgba(239, 68, 68, 0.12)';
+                        td.style.border = '1px solid var(--accent-fire)';
+                        td.title = `週休希望重複: 同一小隊で同日に ${dailyOffCount[d]} 名が希望しています`;
+                        
+                        const conflictBadge = document.createElement('span');
+                        conflictBadge.style.fontSize = '8px';
+                        conflictBadge.style.background = 'var(--accent-fire)';
+                        conflictBadge.style.color = 'white';
+                        conflictBadge.style.padding = '1px 3px';
+                        conflictBadge.style.borderRadius = '3px';
+                        conflictBadge.style.position = 'absolute';
+                        conflictBadge.style.top = '1px';
+                        conflictBadge.style.right = '1px';
+                        conflictBadge.style.lineHeight = '1';
+                        conflictBadge.textContent = `${dailyOffCount[d]}`;
+                        
+                        td.style.position = 'relative';
+                        td.appendChild(conflictBadge);
                     }
                 }
                 
@@ -3085,9 +3433,26 @@ function showShiftModal(staffId, staffName, dayIndex, isPreScheduling = false) {
     const titlePrefix = isPreScheduling ? "事前指定シフトの設定" : "シフト変更";
     document.getElementById('modal-title').textContent = `${staffName} の${titlePrefix} - ${dateStr}`;
     
-    // 開始日のラベル設定と、終了日入力欄のリセット
-    document.getElementById('modal-start-day-label').textContent = dayIndex + 1;
-    document.getElementById('modal-end-day-input').value = '';
+    // 開始日のラベル設定 (月日で表示)
+    const startDayStr = `${date.getMonth()+1}/${date.getDate()}(${WEEKDAYS_JP[date.getDay()]})`;
+    document.getElementById('modal-start-day-label').textContent = startDayStr;
+    
+    // 終了日選択肢を動的に生成
+    const endSelect = document.getElementById('modal-end-day-select');
+    endSelect.innerHTML = '';
+    for (let d = dayIndex; d < 28; d++) {
+        const endDayDate = new Date(activeStartDate);
+        endDayDate.setDate(activeStartDate.getDate() + d);
+        const endHolidayName = getJapaneseHoliday(endDayDate);
+        const endDayStr = `${endDayDate.getMonth()+1}/${endDayDate.getDate()}(${WEEKDAYS_JP[endDayDate.getDay()]})${endHolidayName ? '・' + endHolidayName : ''}`;
+        
+        const opt = document.createElement('option');
+        opt.value = d + 1; // 1-indexed for compatibility
+        opt.textContent = endDayStr;
+        endSelect.appendChild(opt);
+    }
+    // デフォルトは当日 (dayIndex + 1)
+    endSelect.value = dayIndex + 1;
     
     const modal = document.getElementById('shift-modal');
     modal.style.display = 'flex';
@@ -3102,7 +3467,7 @@ function showShiftModal(staffId, staffName, dayIndex, isPreScheduling = false) {
     // 期間計算ヘルパー関数
     function getTargetRange() {
         const startDay = dayIndex;
-        let endDay = parseInt(document.getElementById('modal-end-day-input').value) - 1;
+        let endDay = parseInt(document.getElementById('modal-end-day-select').value) - 1;
         if (isNaN(endDay) || endDay < startDay) {
             endDay = startDay;
         }
