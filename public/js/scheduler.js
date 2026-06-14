@@ -474,8 +474,8 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11, minS
         const schedule = new Array(28);
         const staffHopes = hopeShifts[staff.id] || {};
         for (let k = 0; k < 14; k++) {
-            const val1 = seq[k] === 0 ? '当' : '休';
-            const val2 = seq[k] === 0 ? '明' : '休';
+            const val1 = seq[k] === 0 ? '当' : '週';
+            const val2 = seq[k] === 0 ? '明' : '週';
             
             schedule[2 * k] = staffHopes[2 * k] || val1;
             schedule[2 * k + 1] = staffHopes[2 * k + 1] || val2;
@@ -491,8 +491,8 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11, minS
         for (let k = 0; k < 14; k++) {
             const activeDay = 2 * k + 1;
             const inactiveDay = (2 * k + 2) % 28;
-            const valActive = seq[k] === 0 ? '当' : '休';
-            const valInactive = seq[k] === 0 ? '明' : '休';
+            const valActive = seq[k] === 0 ? '当' : '週';
+            const valInactive = seq[k] === 0 ? '明' : '週';
             
             schedule[activeDay] = staffHopes[activeDay] || valActive;
             schedule[inactiveDay] = staffHopes[inactiveDay] || valInactive;
@@ -514,7 +514,7 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11, minS
             if (dayStr >= s.supportStart && dayStr <= s.supportEnd) {
                 schedule[d] = (d % 2 === 0) ? '当' : '明';
             } else {
-                schedule[d] = '休';
+                schedule[d] = '週';
             }
         }
         roster[s.id] = schedule;
@@ -534,7 +534,7 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11, minS
             if (dayStr >= s.supportStart && dayStr <= s.supportEnd) {
                 schedule[d] = (d % 2 === 1) ? '当' : '明';
             } else {
-                schedule[d] = '休';
+                schedule[d] = '週';
             }
         }
         roster[s.id] = schedule;
@@ -598,7 +598,7 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, 
         for (let d = 0; d < 28; d++) {
             const shift = schedule[d];
             if (shift === '当') dutyCount++;
-            if (shift === '休') holidayCount++;
+            if (shift === '週') holidayCount++;
 
             // ハード制約：当の翌日は当であってはならない
             if (shift === '当' && schedule[(d + 1) % 28] === '当') {
@@ -818,7 +818,7 @@ function exportToCSV(roster, startDate, staffList, hourlyLeaves = {}, activeCycl
             const shift = schedule[d];
             row.push(shift);
             if (shift === '当') dutyCount++;
-            if (shift === '休') holidayCount++;
+            if (shift === '週') holidayCount++;
             if (shift === '有') {
                 const hourlyKey = `${activeCycle}_${staff.id}_${d}`;
                 if (hourlyLeaves[hourlyKey]) {

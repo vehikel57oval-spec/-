@@ -13,16 +13,16 @@
     --text-secondary: #475569;
     --text-muted: #94a3b8;
     
-    --primary-color: #4f46e5;       /* Indigo */
-    --primary-hover: #4338ca;
-    --primary-light: #e0e7ff;
+    --primary-color: #0284c7;       /* Refreshing Blue */
+    --primary-hover: #0369a1;
+    --primary-light: #e0f2fe;
     
     --secondary-bg: #f1f5f9;
     --secondary-text: #334155;
     --secondary-hover: #e2e8f0;
 
     /* Shift Badge Colors */
-    --color-duty-bg: #4f46e5;       /* 当 */
+    --color-duty-bg: #0284c7;       /* 当 */
     --color-duty-text: #ffffff;
     --color-off-bg: #e2e8f0;        /* 非 (非番) */
     --color-off-text: #64748b;
@@ -70,9 +70,9 @@
     --text-secondary: #d1d5db;
     --text-muted: #6b7280;
     
-    --primary-color: #6366f1;
-    --primary-hover: #4f46e5;
-    --primary-light: rgba(99, 102, 241, 0.15);
+    --primary-color: #0ea5e9;
+    --primary-hover: #38bdf8;
+    --primary-light: rgba(14, 165, 233, 0.15);
     
     --secondary-bg: #1f2937;
     --secondary-text: #e5e7eb;
@@ -177,7 +177,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .btn-primary:hover {
     background-color: var(--primary-hover);
-    box-shadow: 0 0 12px rgba(79, 70, 229, 0.4);
+    box-shadow: 0 0 12px rgba(2, 132, 199, 0.4);
 }
 
 .btn-secondary {
@@ -1171,7 +1171,7 @@ h1, h2, h3, h4, h5, h6 {
     
     /* Force color prints for badges */
     .badge-duty {
-        background-color: #4f46e5 !important;
+        background-color: #0284c7 !important;
         color: #ffffff !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
@@ -1512,7 +1512,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .support-table tbody tr:hover {
-    background-color: rgba(79, 70, 229, 0.04);
+    background-color: rgba(2, 132, 199, 0.04);
 }
 
 .badge-support {
@@ -1524,7 +1524,7 @@ h1, h2, h3, h4, h5, h6 {
     background-color: var(--primary-light);
     color: var(--primary-color);
     margin-left: 6px;
-    border: 1px solid rgba(79, 70, 229, 0.2);
+    border: 1px solid rgba(2, 132, 199, 0.2);
     vertical-align: middle;
 }
 

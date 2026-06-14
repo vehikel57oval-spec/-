@@ -643,8 +643,8 @@ async function render(container) {
                 勤務スケジュール管理 (隔日勤務 2交代)
             </div>
             <div style="display:flex; gap:12px;">
-                <button id="btn-save" class="btn btn-secondary admin-only" style="font-size:13px; padding:6px 16px;">下書き保存</button>
-                <button id="btn-confirm" class="btn btn-primary admin-only" style="font-size:13px; padding:6px 16px;">勤務表を確定</button>
+                <button id="btn-save-draft" class="btn btn-secondary admin-only" style="font-size:13px; padding:6px 16px;">下書き保存</button>
+                <button id="btn-confirm-schedule" class="btn btn-primary admin-only" style="font-size:13px; padding:6px 16px;">勤務表を確定</button>
             </div>
         </div>
         
@@ -689,7 +689,7 @@ async function render(container) {
                     </div>
                     <div class="form-group admin-only" style="display: flex; align-items: center; gap: 8px; margin-top:4px; margin-bottom:0;">
                         <input type="checkbox" id="chk-auto-leave" style="width: 16px; height: 16px; cursor: pointer;">
-                        <label class="form-label" for="chk-auto-leave" style="margin-bottom: 0; cursor: pointer; font-size:11px;">余剰日に年休を自動挿入</label>
+                        <label class="form-label" for="chk-auto-leave" style="margin-bottom: 0; cursor: pointer; font-size:11px;">余剰日に休暇を自動挿入</label>
                     </div>
                 </section>
 
@@ -1264,7 +1264,8 @@ function initSettings() {
     state.shifts = [
         { key: "当", name: "勤務", char: "当", color: "#e0f2fe", textColor: "#0369a1", isSystem: true },
         { key: "明", name: "非番", char: "非", color: "#f3f4f6", textColor: "#4b5563", isSystem: true },
-        { key: "休", name: "週休", char: "休", color: "#fef3c7", textColor: "#d97706", isSystem: true },
+        { key: "週", name: "週休", char: "週", color: "#fef3c7", textColor: "#d97706", isSystem: true },
+        { key: "休", name: "休日", char: "休", color: "#fee2e2", textColor: "#dc2626", isSystem: true },
         { key: "有", name: "年休", char: "年", color: "#dcfce7", textColor: "#15803d" },
         { key: "公", name: "公休", char: "公", color: "#f3e8ff", textColor: "#6b21a8" },
         { key: "張", name: "出張", char: "張", color: "#e2f0fd", textColor: "#2563eb" },
@@ -1393,7 +1394,6 @@ function generateEmptyRoster() {
 }
 
 // 余剰人員日への年休（有）自動割当ロジック
-// 余剰人員日への年休（有）自動割当ロジック
 function adjustSurplusLeaves(cycleNum) {
     console.log(`=== adjustSurplusLeaves START (cycle: ${cycleNum}) ===`);
     const minStaff = state.minStaffing;
@@ -1402,152 +1402,176 @@ function adjustSurplusLeaves(cycleNum) {
     const minPara = state.minParamedic;
     console.log(`Settings - minStaff: ${minStaff}, minSub: ${minSub}, minLarge: ${minLarge}, minPara: ${minPara}`);
     
-    // 各日（0〜27日）の余剰人員を調整するループ
-    for (let d = 0; d < 28; d++) {
-        // 出勤している職員のリストを作成
-        let onDutyStaff = [];
-        state.staffList.forEach(staff => {
-            const key = `${cycleNum}_${staff.id}`;
-            const shift = (state.roster[key] && state.roster[key][d]) || '-';
+    // 対象の正規職員リスト（応援職員を除き、現在アクティブな小隊の職員で、かつこのサイクルで当番日「当」が1日以上ある職員のみ）
+    const targetStaff = state.staffList.filter(staff => {
+        if (staff.isSupport) return false;
+        if (staff.platoon !== state.activePlatoon) return false;
+        const key = `${cycleNum}_${staff.id}`;
+        const schedule = state.roster[key] || [];
+        return schedule.includes('当');
+    });
+    if (targetStaff.length === 0) {
+        console.log("No active staff for surplus leaves adjustment.");
+        return;
+    }
+
+    // 資格制約チェック関数
+    function canTakeLeave(rosterState, staff, day) {
+        const key = `${cycleNum}_${staff.id}`;
+        if ((rosterState[key] && rosterState[key][day]) !== '当') {
+            return false;
+        }
+
+        let onDuty = [];
+        state.staffList.forEach(s => {
+            const k = `${cycleNum}_${s.id}`;
+            const shift = (rosterState[k] && rosterState[k][day]) || '-';
             if (shift === '当') {
-                onDutyStaff.push(staff);
+                onDuty.push(s);
             }
         });
-        
-        // 余剰がなければ次の日へ
-        let surplus = onDutyStaff.length - minStaff;
-        if (surplus <= 0) {
-            continue;
+
+        const remaining = onDuty.filter(s => s.id !== staff.id);
+        if (remaining.length < minStaff) return false;
+
+        const subCount = remaining.filter(s => s.rank === "消防司令" || s.rank === "消防司令補").length;
+        const currentSubCount = onDuty.filter(s => s.rank === "消防司令" || s.rank === "消防司令補").length;
+        if (subCount < minSub && subCount < currentSubCount) return false;
+
+        const largeCount = remaining.filter(s => s.hasLargeLicense).length;
+        const currentLargeCount = onDuty.filter(s => s.hasLargeLicense).length;
+        if (largeCount < minLarge && largeCount < currentLargeCount) return false;
+
+        const paraCount = remaining.filter(s => s.isParamedic).length;
+        const currentParaCount = onDuty.filter(s => s.isParamedic).length;
+        if (paraCount < minPara && paraCount < currentParaCount) return false;
+
+        return true;
+    }
+
+    // 連休（週休・休暇隣接）回避チェック
+    function hasConsecutiveLeave(rosterState, staff, day) {
+        const key = `${cycleNum}_${staff.id}`;
+        const schedule = rosterState[key] || [];
+        if (day >= 2) {
+            const prevShift = schedule[day - 2];
+            if (prevShift && prevShift !== '当' && prevShift !== '明') {
+                return true;
+            }
         }
-        
-        console.log(`Day ${d + 1}: On-duty count = ${onDutyStaff.length}, Surplus = ${surplus}`);
-        
-        // 職員ごとのこのサイクルの現時点での総休日数をカウント（公平性の基準にする）
-        const holidayCounts = {};
-        state.staffList.forEach(staff => {
-            const key = `${cycleNum}_${staff.id}`;
-            const sched = state.roster[key] || [];
-            let count = 0;
-            sched.forEach(s => {
-                if (s !== '当' && s !== '明') {
-                    count++;
+        if (day <= 25) {
+            const nextShift = schedule[day + 2];
+            if (nextShift && nextShift !== '当' && nextShift !== '明') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // 各日の余剰人員数計算
+    function getDaySurplus(rosterState) {
+        const surplus = [];
+        for (let d = 0; d < 28; d++) {
+            let onDutyCount = 0;
+            state.staffList.forEach(s => {
+                const key = `${cycleNum}_${s.id}`;
+                const shift = (rosterState[key] && rosterState[key][d]) || '-';
+                if (shift === '当') {
+                    onDutyCount++;
                 }
             });
-            holidayCounts[staff.id] = count;
-        });
+            const s = onDutyCount - minStaff;
+            surplus.push(s > 0 ? s : 0);
+        }
+        return surplus;
+    }
+
+    let lastConfirmedRoster = JSON.parse(JSON.stringify(state.roster));
+    let currentRoster = JSON.parse(JSON.stringify(state.roster));
+
+    let round = 1;
+    while (true) {
+        console.log(`--- Round ${round} Start ---`);
+        let tempRoster = JSON.parse(JSON.stringify(currentRoster));
         
-        // 余剰人員が解消されるまで割り当てる
-        while (surplus > 0) {
-            let bestStaff = null;
-            let maxScore = -999999;
-            let bestStaffFallback = null;
-            let maxScoreFallback = -999999;
-            
-            console.log(`  Attempting to assign annual leave. Current surplus = ${surplus}`);
-            
-            for (let i = 0; i < onDutyStaff.length; i++) {
-                const staff = onDutyStaff[i];
-                
-                // --- 制約条件1: 資格基準の検証 ---
-                // この職員が抜けた場合の残りの出勤メンバーをシミュレーション
-                const remaining = onDutyStaff.filter(s => s.id !== staff.id);
-                
-                // 1. 最低人員チェック
-                if (remaining.length < minStaff) {
-                    console.log(`    [Skip] ${staff.name}: Remaining staff (${remaining.length}) < minStaff (${minStaff})`);
-                    continue;
-                }
-                
-                // 2. 司令補以上チェック
-                const subCount = remaining.filter(s => s.rank === "消防司令" || s.rank === "消防司令補").length;
-                const currentSubCount = onDutyStaff.filter(s => s.rank === "消防司令" || s.rank === "消防司令補").length;
-                if (subCount < minSub && subCount < currentSubCount) {
-                    console.log(`    [Skip] ${staff.name}: Sub-officers remaining (${subCount}) < minSub (${minSub}) and decreased`);
-                    continue;
-                }
-                
-                // 3. 大型免許チェック
-                const largeCount = remaining.filter(s => s.hasLargeLicense).length;
-                const currentLargeCount = onDutyStaff.filter(s => s.hasLargeLicense).length;
-                if (largeCount < minLarge && largeCount < currentLargeCount) {
-                    console.log(`    [Skip] ${staff.name}: Large license holders remaining (${largeCount}) < minLarge (${minLarge}) and decreased`);
-                    continue;
-                }
-                
-                // 4. 救命士チェック
-                const paraCount = remaining.filter(s => s.isParamedic).length;
-                const currentParaCount = onDutyStaff.filter(s => s.isParamedic).length;
-                if (paraCount < minPara && paraCount < currentParaCount) {
-                    console.log(`    [Skip] ${staff.name}: Paramedics remaining (${paraCount}) < minPara (${minPara}) and decreased`);
-                    continue;
-                }
-                
-                // --- 制約条件2: 連休（週休・休暇隣接）回避チェック ---
-                // 週休「休」や他の休暇と隣接していないかをチェック（前後1つ分の当番日 = 2日前、2日後）
-                const rosterKey = `${cycleNum}_${staff.id}`;
-                const schedule = state.roster[rosterKey] || [];
-                
-                let isConsecutiveHoliday = false;
-                
-                // 2日前チェック
-                if (d >= 2) {
-                    const prevShift = schedule[d - 2];
-                    if (prevShift && prevShift !== '当' && prevShift !== '明') {
-                        isConsecutiveHoliday = true;
+        const assignedInRound = {};
+        targetStaff.forEach(s => {
+            assignedInRound[s.id] = false;
+        });
+
+        let success = true;
+
+        for (let step = 0; step < targetStaff.length; step++) {
+            const unassignedStaff = targetStaff.filter(s => !assignedInRound[s.id]);
+            if (unassignedStaff.length === 0) break;
+
+            const daySurplus = getDaySurplus(tempRoster);
+
+            // 各未割り当て職員について、割り当て可能日のリストアップ (週休隣接回避をハード制約とする)
+            const candidates = unassignedStaff.map(staff => {
+                const validDays = [];
+                for (let d = 0; d < 28; d++) {
+                    if (daySurplus[d] > 0 && canTakeLeave(tempRoster, staff, d) && !hasConsecutiveLeave(tempRoster, staff, d)) {
+                        validDays.push(d);
                     }
                 }
-                // 2日後チェック
-                if (d <= 25) {
-                    const nextShift = schedule[d + 2];
-                    if (nextShift && nextShift !== '当' && nextShift !== '明') {
-                        isConsecutiveHoliday = true;
-                    }
-                }
-                
-                // スコア計算
-                // 基本スコア：総休日数が少ない職員を優先（公平性の担保）
-                const baseScore = -holidayCounts[staff.id] * 100 + Math.random() * 5;
-                
-                if (!isConsecutiveHoliday) {
-                    if (baseScore > maxScore) {
-                        maxScore = baseScore;
-                        bestStaff = staff;
-                    }
-                } else {
-                    if (baseScore > maxScoreFallback) {
-                        maxScoreFallback = baseScore;
-                        bestStaffFallback = staff;
-                    }
-                }
-            }
-            
-            // 割り当てるべき職員の決定
-            let selectedStaff = null;
-            if (bestStaff) {
-                selectedStaff = bestStaff;
-                console.log(`    [Select] Selected ${selectedStaff.name} (Consecutive holiday avoided)`);
-            } else if (bestStaffFallback) {
-                selectedStaff = bestStaffFallback;
-                console.log(`    [Select Fallback] Selected ${selectedStaff.name} (Consecutive holiday allowed as fallback)`);
-            }
-            
-            if (!selectedStaff) {
-                console.log(`    [Stop] No eligible staff found to reduce for Day ${d + 1}`);
+                return { staff, validDays };
+            });
+
+            // 選択肢が少ない順にソート (MRV)
+            candidates.sort((a, b) => a.validDays.length - b.validDays.length);
+
+            const targetCandidate = candidates[0];
+            if (targetCandidate.validDays.length === 0) {
+                console.log(`Round ${round}: Staff ${targetCandidate.staff.name} has no eligible days (without consecutive leaves). Round fails.`);
+                success = false;
                 break;
             }
-            
-            // 休暇（年休）の割り当てを実行
-            const rosterKey = `${cycleNum}_${selectedStaff.id}`;
-            state.roster[rosterKey][d] = '有'; // 設定にある年休キー
-            
-            // 状態の更新
-            onDutyStaff = onDutyStaff.filter(s => s.id !== selectedStaff.id);
-            holidayCounts[selectedStaff.id]++;
-            surplus--;
+
+            const staff = targetCandidate.staff;
+            let bestDay = -1;
+            let bestScore = -999999;
+
+            targetCandidate.validDays.forEach(d => {
+                let score = 0;
+                
+                // 余剰人員が多い日を優先
+                score += daySurplus[d] * 100;
+                
+                // 少しランダム値を加えてタイブレーク
+                score += Math.random() * 5;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestDay = d;
+                }
+            });
+
+            if (bestDay !== -1) {
+                const key = `${cycleNum}_${staff.id}`;
+                tempRoster[key][bestDay] = '休';
+                assignedInRound[staff.id] = true;
+                console.log(`Round ${round}: Assigned '休' to ${staff.name} on Day ${bestDay + 1}`);
+            } else {
+                success = false;
+                break;
+            }
+        }
+
+        if (success) {
+            console.log(`Round ${round} Succeeded! All target staff received a holiday.`);
+            currentRoster = JSON.parse(JSON.stringify(tempRoster));
+            lastConfirmedRoster = JSON.parse(JSON.stringify(tempRoster));
+            round++;
+        } else {
+            console.log(`Round ${round} Failed. Rolling back to Round ${round - 1} results.`);
+            currentRoster = JSON.parse(JSON.stringify(lastConfirmedRoster));
+            break;
         }
     }
-    console.log(`=== adjustSurplusLeaves END ===`);
-}
+
+    state.roster = currentRoster;
+    console.log(`=== adjustSurplusLeaves END ===`);}
 
 // 階級・資格の短縮名取得
 function getRankAbbr(rank) {
@@ -2006,13 +2030,13 @@ function bindEvents() {
                             schedule[d] = '明';
                             state.hopeShifts[key][d] = '明';
                         } else {
-                            schedule[d] = '休';
-                            state.hopeShifts[key][d] = '休';
+                            schedule[d] = '週';
+                            state.hopeShifts[key][d] = '週';
                         }
                     } else {
                         // 期間外：すべて休み
-                        schedule[d] = '休';
-                        state.hopeShifts[key][d] = '休';
+                        schedule[d] = '週';
+                        state.hopeShifts[key][d] = '週';
                     }
                 }
                 state.roster[key] = schedule;
@@ -2188,41 +2212,60 @@ function bindEvents() {
     });
 
     // 設定保存 (JSONファイルダウンロード) (全サイクル保存)
-    document.getElementById('btn-save').addEventListener('click', () => {
-        const saveData = {
-            startDate: document.getElementById('input-start-date').value,
-            activeCycle: state.activeCycle,
-            station: state.station,
-            shifts: state.shifts,
-            platoonSize: state.platoonSize,
-            minStaffing: state.minStaffing,
-            minSubOfficer: state.minSubOfficer,
-            minLarge: state.minLarge,
-            minParamedic: state.minParamedic,
-            staffList: state.staffList,
-            hopeShifts: state.hopeShifts,
-            roster: state.roster,
-            hourlyLeaves: state.hourlyLeaves,
-            vehicleAssignments: state.vehicleAssignments || {},
-            deployedVehicles: state.deployedVehicles || []
-        };
-        const blob = new Blob([JSON.stringify(saveData, null, 2)], { type: 'application/json' });
-                        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.setAttribute('href', url);
-        link.setAttribute('download', 'シフト設定データ.json');
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    });
+    const elBtnExportJson = document.getElementById('btn-export-json');
+    if (elBtnExportJson) {
+        elBtnExportJson.addEventListener('click', () => {
+            const saveData = {
+                startDate: document.getElementById('input-start-date').value,
+                activeCycle: state.activeCycle,
+                station: state.station,
+                shifts: state.shifts,
+                platoonSize: state.platoonSize,
+                minStaffing: state.minStaffing,
+                minSubOfficer: state.minSubOfficer,
+                minLarge: state.minLarge,
+                minParamedic: state.minParamedic,
+                staffList: state.staffList,
+                hopeShifts: state.hopeShifts,
+                roster: state.roster,
+                hourlyLeaves: state.hourlyLeaves,
+                vehicleAssignments: state.vehicleAssignments || {},
+                deployedVehicles: state.deployedVehicles || []
+            };
+            const blob = new Blob([JSON.stringify(saveData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'シフト設定データ.json');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+    }
 
     // 設定読込 (全サイクル読込、古いフォーマットとの互換性マッピング付き)
-    const elBtnLoad = document.getElementById('btn-load');
-    if (elBtnLoad) {
-        elBtnLoad.addEventListener('click', () => {
+    const elBtnImportJson = document.getElementById('btn-import-json');
+    if (elBtnImportJson) {
+        elBtnImportJson.addEventListener('click', () => {
             const elFileLoader = document.getElementById('file-loader');
             if (elFileLoader) elFileLoader.click();
+        });
+    }
+
+    // 下書き保存 (データベースへの保存)
+    const elBtnSaveDraft = document.getElementById('btn-save-draft');
+    if (elBtnSaveDraft) {
+        elBtnSaveDraft.addEventListener('click', () => {
+            saveDraft();
+        });
+    }
+
+    // 勤務表の確定
+    const elBtnConfirmSchedule = document.getElementById('btn-confirm-schedule');
+    if (elBtnConfirmSchedule) {
+        elBtnConfirmSchedule.addEventListener('click', () => {
+            confirmSchedule();
         });
     }
     
@@ -2265,7 +2308,8 @@ function bindEvents() {
                         state.shifts = [
                             { key: "当", name: "勤務", char: "当", color: "#e0f2fe", textColor: "#0369a1", isSystem: true },
                             { key: "明", name: "非番", char: "非", color: "#f3f4f6", textColor: "#4b5563", isSystem: true },
-                            { key: "休", name: "週休", char: "休", color: "#fef3c7", textColor: "#d97706", isSystem: true },
+                            { key: "週", name: "週休", char: "週", color: "#fef3c7", textColor: "#d97706", isSystem: true },
+                            { key: "休", name: "休日", char: "休", color: "#fee2e2", textColor: "#dc2626", isSystem: true },
                             { key: "有", name: "年休", char: "年", color: "#dcfce7", textColor: "#15803d" },
                             { key: "公", name: "公休", char: "公", color: "#f3e8ff", textColor: "#6b21a8" },
                             { key: "張", name: "出張", char: "張", color: "#e2f0fd", textColor: "#2563eb" },
@@ -2727,7 +2771,7 @@ function renderRosterTable() {
                 tr.appendChild(td);
                 
                 if (shift === '当') dutyCount++;
-                if (shift === '休') holidayCount++;
+                if (shift === '週') holidayCount++;
                 if (shift === '有') {
                     const hourlyKey = `${state.activeCycle}_${staff.id}_${d}`;
                     if (state.hourlyLeaves[hourlyKey]) {
@@ -3051,7 +3095,7 @@ function renderHopeTable() {
             const key = `${state.activeCycle}_${staff.id}`;
             const staffHopes = state.hopeShifts[key] || {};
             for (let d = 0; d < 28; d++) {
-                if (staffHopes[d] === '休') {
+                if (staffHopes[d] === '週') {
                     dailyOffCount[d]++;
                 }
             }
@@ -3106,7 +3150,7 @@ function renderHopeTable() {
                     }
                     
                     // 週休希望が重複（2名以上）している場合のハイライト警告
-                    if (shift === '休' && dailyOffCount[d] > 1) {
+                    if (shift === '週' && dailyOffCount[d] > 1) {
                         td.style.background = 'rgba(239, 68, 68, 0.12)';
                         td.style.border = '1px solid var(--accent-fire)';
                         td.title = `週休希望重複: 同一小隊で同日に ${dailyOffCount[d]} 名が希望しています`;
