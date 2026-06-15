@@ -152,6 +152,36 @@ function seedData() {
     dbData.staff.push(...staffList);
 }
 
+function migrateData() {
+    let modified = false;
+    if (dbData.staff && Array.isArray(dbData.staff)) {
+        dbData.staff.forEach(s => {
+            if (s.position === undefined) {
+                // Determine default position based on rank
+                if (s.rank === "消防司令" || s.rank === "消防司令補" || s.rank === "主幹" || s.rank === "小隊長" || s.rank === "消防隊長" || s.rank === "救急隊長" || s.rank === "救助隊長" || s.rank === "庶務経理") {
+                    s.position = "小隊長";
+                    // If rank was saved as position in the previous design, revert rank to a standard one:
+                    if (["小隊長", "消防隊長", "救急隊長", "救助隊長", "庶務経理", "主幹"].includes(s.rank)) {
+                        s.position = s.rank;
+                        s.rank = "消防司令補";
+                    }
+                } else if (s.rank === "消防士長") {
+                    s.position = "消防副";
+                } else {
+                    if (s.is_paramedic) s.position = "救急隊";
+                    else if (s.is_rescue) s.position = "救助隊";
+                    else s.position = "消防隊";
+                }
+                modified = true;
+            }
+        });
+    }
+    if (modified) {
+        console.log('Migrating database: Added default position fields to staff.');
+        saveDatabase();
+    }
+}
+
 function loadDatabase() {
     if (fs.existsSync(dbFilePath)) {
         try {
@@ -166,6 +196,7 @@ function loadDatabase() {
         seedData();
         saveDatabase();
     }
+    migrateData();
 }
 
 function saveDatabase() {
@@ -612,9 +643,9 @@ class Statement {
                 const end = params[2];
                 result = result.filter(x => x.start_date >= start && x.start_date <= end);
             } else if (sql.includes("start_date <= ? AND end_date >= ?")) {
-                const start = params[1];
-                const end = params[2];
-                result = result.filter(x => x.start_date <= end && x.end_date >= start);
+                const limitEnd = params[1];
+                const limitStart = params[2];
+                result = result.filter(x => x.start_date <= limitEnd && x.end_date >= limitStart);
             }
             return result;
         }
@@ -622,9 +653,9 @@ class Statement {
         // 23. 全職員の特定期間 of 休暇申請取得 (起算日スライド用などの日付重なり)
         if (sql.includes("FROM leave_requests") && sql.includes("start_date <= ? AND end_date >= ?")) {
             if (!dbData.leave_requests) dbData.leave_requests = [];
-            const start = params[0];
-            const end = params[1];
-            let result = dbData.leave_requests.filter(x => x.start_date <= end && x.end_date >= start);
+            const limitEnd = params[0];
+            const limitStart = params[1];
+            let result = dbData.leave_requests.filter(x => x.start_date <= limitEnd && x.end_date >= limitStart);
             if (sql.includes("status = 'approved'") || sql.includes('status = "approved"')) {
                 result = result.filter(x => x.status === 'approved');
             }
@@ -792,48 +823,85 @@ class Statement {
         }
         
         // 9. 職員新規追加
-        else if (sql.includes("INSERT INTO staff ( department_id")) {
+        else if (sql.includes("INSERT INTO staff ( department_id") || sql.includes("INSERT INTO staff (department_id")) {
             const id = dbData.staff.length + 1;
-            dbData.staff.push({
-                id,
-                department_id: params[0],
-                station_id: params[1],
-                employee_number: params[2],
-                pin_hash: params[3],
-                name: params[4],
-                platoon: params[5],
-                rank: params[6],
-                has_large_license: params[7],
-                is_paramedic: params[8],
-                is_rescue: params[9],
-                is_kikan: params[10],
-                is_day_worker: params[11],
-                role: params[12],
-                annual_leave_balance: params[13],
-                is_active: 1,
-                created_at: new Date().toISOString()
-            });
+            const hasPosition = sql.includes("position");
+            if (hasPosition) {
+                dbData.staff.push({
+                    id,
+                    department_id: params[0],
+                    station_id: params[1],
+                    employee_number: params[2],
+                    pin_hash: params[3],
+                    name: params[4],
+                    platoon: params[5],
+                    rank: params[6],
+                    position: params[7],
+                    has_large_license: params[8],
+                    is_paramedic: params[9],
+                    is_rescue: params[10],
+                    is_kikan: params[11],
+                    is_day_worker: params[12],
+                    role: params[13],
+                    annual_leave_balance: params[14],
+                    is_active: 1,
+                    created_at: new Date().toISOString()
+                });
+            } else {
+                dbData.staff.push({
+                    id,
+                    department_id: params[0],
+                    station_id: params[1],
+                    employee_number: params[2],
+                    pin_hash: params[3],
+                    name: params[4],
+                    platoon: params[5],
+                    rank: params[6],
+                    has_large_license: params[7],
+                    is_paramedic: params[8],
+                    is_rescue: params[9],
+                    is_kikan: params[10],
+                    is_day_worker: params[11],
+                    role: params[12],
+                    annual_leave_balance: params[13],
+                    is_active: 1,
+                    created_at: new Date().toISOString()
+                });
+            }
             lastInsertRowid = id;
             changes = 1;
         }
         
         // 10. 職員更新
-        else if (sql.includes("UPDATE staff SET name = ?")) {
-            const staffId = parseInt(params[12]);
+        else if (sql.includes("UPDATE staff SET name = ?") || sql.includes("UPDATE staff SET name=?")) {
+            const hasPosition = sql.includes("position = ?") || sql.includes("position=?");
+            const staffId = parseInt(params[hasPosition ? 13 : 12]);
             const s = dbData.staff.find(x => x.id === staffId);
             if (s) {
                 s.name = params[0];
                 s.station_id = params[1];
                 s.platoon = params[2];
                 s.rank = params[3];
-                s.has_large_license = params[4];
-                s.is_paramedic = params[5];
-                s.is_rescue = params[6];
-                s.is_kikan = params[7];
-                s.is_day_worker = params[8];
-                s.role = params[9];
-                s.annual_leave_balance = params[10];
-                s.is_active = params[11];
+                if (hasPosition) {
+                    s.position = params[4];
+                    s.has_large_license = params[5];
+                    s.is_paramedic = params[6];
+                    s.is_rescue = params[7];
+                    s.is_kikan = params[8];
+                    s.is_day_worker = params[9];
+                    s.role = params[10];
+                    s.annual_leave_balance = params[11];
+                    s.is_active = params[12];
+                } else {
+                    s.has_large_license = params[4];
+                    s.is_paramedic = params[5];
+                    s.is_rescue = params[6];
+                    s.is_kikan = params[7];
+                    s.is_day_worker = params[8];
+                    s.role = params[9];
+                    s.annual_leave_balance = params[10];
+                    s.is_active = params[11];
+                }
                 changes = 1;
             }
         }
@@ -971,11 +1039,29 @@ class Statement {
             const staff_id = parseInt(params[3]);
             const platoon = params[4];
             const rank = params[5];
-            const has_large_license = parseInt(params[6] || 0);
-            const is_paramedic = parseInt(params[7] || 0);
-            const is_rescue = parseInt(params[8] || 0);
-            const is_kikan = parseInt(params[9] || 0);
-            const is_day_worker = parseInt(params[10] || 0);
+            
+            const hasPosition = sql.includes("position");
+            let position = '';
+            let has_large_license = 0;
+            let is_paramedic = 0;
+            let is_rescue = 0;
+            let is_kikan = 0;
+            let is_day_worker = 0;
+            
+            if (hasPosition) {
+                position = params[6];
+                has_large_license = parseInt(params[7] || 0);
+                is_paramedic = parseInt(params[8] || 0);
+                is_rescue = parseInt(params[9] || 0);
+                is_kikan = parseInt(params[10] || 0);
+                is_day_worker = parseInt(params[11] || 0);
+            } else {
+                has_large_license = parseInt(params[6] || 0);
+                is_paramedic = parseInt(params[7] || 0);
+                is_rescue = parseInt(params[8] || 0);
+                is_kikan = parseInt(params[9] || 0);
+                is_day_worker = parseInt(params[10] || 0);
+            }
 
             const idx = dbData.schedule_staff_overrides.findIndex(x =>
                 x.cycle_number === cycle_number && x.start_date === start_date && x.staff_id === staff_id
@@ -987,6 +1073,7 @@ class Statement {
                 staff_id,
                 platoon,
                 rank,
+                position,
                 has_large_license,
                 is_paramedic,
                 is_rescue,

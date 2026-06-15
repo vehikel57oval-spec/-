@@ -878,7 +878,7 @@ function insertAnnualLeaves(roster, staffList, minStaffing = 11, minSubOfficer =
                 if (s && s.platoon === activePlatoonNum) {
                     dutyStaffIds.push(staffId);
                     if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) officersOnDuty++;
-                    if (s.rank === "消防司令補") subOfficersOnDuty++;
+                    if (["消防司令", "消防司令補"].includes(s.rank)) subOfficersOnDuty++;
                     if (s.hasLargeLicense) largeOnDuty++;
                     if (s.isParamedic) paramedicsOnDuty++;
                     if (s.isRescue) rescueOnDuty++;
@@ -895,8 +895,13 @@ function insertAnnualLeaves(roster, staffList, minStaffing = 11, minSubOfficer =
             const total = staffList.filter(s => s.platoon === platoonNum && ["消防司令", "消防司令補", "消防士長"].includes(s.rank)).length;
             return Math.min(2, total);
         };
+        const getPlatoonSubOfficerTarget = (platoonNum, userMin = 1) => {
+            const total = staffList.filter(s => s.platoon === platoonNum && ["消防司令", "消防司令補"].includes(s.rank)).length;
+            return Math.min(userMin, total);
+        };
 
         const targetOfficers = getPlatoonOfficerTarget(activePlatoonNum);
+        const targetSubOfficers = getPlatoonSubOfficerTarget(activePlatoonNum, minSubOfficer);
         const targetLarge = getPlatoonTarget(activePlatoonNum, 'hasLargeLicense');
         const targetParamedics = getPlatoonTarget(activePlatoonNum, 'isParamedic');
         const targetRescue = getPlatoonTarget(activePlatoonNum, 'isRescue');
@@ -915,22 +920,25 @@ function insertAnnualLeaves(roster, staffList, minStaffing = 11, minSubOfficer =
 
                 // その人が休んだ（年休になった）場合の、その日の仮の資格保有数を計算
                 let tempOfficers = officersOnDuty;
+                let tempSubOfficers = subOfficersOnDuty;
                 let tempLarge = largeOnDuty;
                 let tempParamedics = paramedicsOnDuty;
                 let tempRescue = rescueOnDuty;
 
                 if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) tempOfficers--;
+                if (["消防司令", "消防司令補"].includes(s.rank)) tempSubOfficers--;
                 if (s.hasLargeLicense) tempLarge--;
                 if (s.isParamedic) tempParamedics--;
                 if (s.isRescue) tempRescue--;
 
                 // 資格バランスが維持されるか？
                 const isOfficerSafe = tempOfficers >= targetOfficers;
+                const isSubOfficerSafe = tempSubOfficers >= targetSubOfficers;
                 const isLargeSafe = tempLarge >= targetLarge;
                 const isParamedicSafe = tempParamedics >= targetParamedics;
                 const isRescueSafe = tempRescue >= targetRescue;
 
-                if (isOfficerSafe && isLargeSafe && isParamedicSafe && isRescueSafe) {
+                if (isOfficerSafe && isSubOfficerSafe && isLargeSafe && isParamedicSafe && isRescueSafe) {
                     candidates.push(staffId);
                 }
             }
@@ -967,6 +975,7 @@ function insertAnnualLeaves(roster, staffList, minStaffing = 11, minSubOfficer =
                 // その日のステータスを更新
                 const s = staffMap[bestStaffId];
                 if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) officersOnDuty--;
+                if (["消防司令", "消防司令補"].includes(s.rank)) subOfficersOnDuty--;
                 if (s.hasLargeLicense) largeOnDuty--;
                 if (s.isParamedic) paramedicsOnDuty--;
                 if (s.isRescue) rescueOnDuty--;

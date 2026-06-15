@@ -12,7 +12,7 @@ const { parseDate, getJapaneseHoliday, getHolidayType } = require('../utils/holi
 router.get('/staff', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
     try {
         let query = `
-            SELECT s.id, s.employee_number, s.name, s.platoon, s.rank, 
+            SELECT s.id, s.employee_number, s.name, s.platoon, s.rank, s.position,
                    s.has_large_license, s.is_paramedic, s.is_rescue, s.is_kikan, 
                    s.is_day_worker, s.role, s.annual_leave_balance, s.is_active,
                    st.name as station_name, st.id as station_id
@@ -44,7 +44,7 @@ router.get('/staff', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (re
  */
 router.post('/staff', verifyToken, requireRole('admin', 'sysadmin'), (req, res) => {
     const {
-        employee_number, pin, name, station_id, platoon, rank,
+        employee_number, pin, name, station_id, platoon, rank, position,
         has_large_license, is_paramedic, is_rescue, is_kikan,
         is_day_worker, role, annual_leave_balance
     } = req.body;
@@ -71,9 +71,9 @@ router.post('/staff', verifyToken, requireRole('admin', 'sysadmin'), (req, res) 
         const insertQuery = `
             INSERT INTO staff (
                 department_id, station_id, employee_number, pin_hash, name,
-                platoon, rank, has_large_license, is_paramedic, is_rescue, is_kikan,
+                platoon, rank, position, has_large_license, is_paramedic, is_rescue, is_kikan,
                 is_day_worker, role, annual_leave_balance, is_active
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         `;
         
         const info = db.prepare(insertQuery).run(
@@ -84,6 +84,7 @@ router.post('/staff', verifyToken, requireRole('admin', 'sysadmin'), (req, res) 
             name,
             platoon,
             rank || '',
+            position || '',
             has_large_license ? 1 : 0,
             is_paramedic ? 1 : 0,
             is_rescue ? 1 : 0,
@@ -111,7 +112,7 @@ router.post('/staff', verifyToken, requireRole('admin', 'sysadmin'), (req, res) 
 router.put('/staff/:id', verifyToken, requireRole('admin', 'sysadmin'), (req, res) => {
     const staffId = req.params.id;
     const {
-        pin, name, station_id, platoon, rank,
+        pin, name, station_id, platoon, rank, position,
         has_large_license, is_paramedic, is_rescue, is_kikan,
         is_day_worker, role, annual_leave_balance, is_active
     } = req.body;
@@ -130,12 +131,12 @@ router.put('/staff/:id', verifyToken, requireRole('admin', 'sysadmin'), (req, re
         const updateStaff = db.transaction(() => {
             db.prepare(`
                 UPDATE staff 
-                SET name = ?, station_id = ?, platoon = ?, rank = ?,
+                SET name = ?, station_id = ?, platoon = ?, rank = ?, position = ?,
                     has_large_license = ?, is_paramedic = ?, is_rescue = ?, is_kikan = ?,
                     is_day_worker = ?, role = ?, annual_leave_balance = ?, is_active = ?
                 WHERE id = ?
             `).run(
-                name, station_id, platoon, rank || '',
+                name, station_id, platoon, rank || '', position || '',
                 has_large_license ? 1 : 0,
                 is_paramedic ? 1 : 0,
                 is_rescue ? 1 : 0,
@@ -175,6 +176,109 @@ router.put('/staff/:id', verifyToken, requireRole('admin', 'sysadmin'), (req, re
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
+/**
+ * @route   POST /api/admin/staff/import
+ * @desc    CSVから職員リストを一括インポート (Upsert) (admin, sysadmin)
+ */
+router.post('/staff/import', verifyToken, requireRole('admin', 'sysadmin'), (req, res) => {
+    const { staffList } = req.body;
+    if (!staffList || !Array.isArray(staffList)) {
+        return res.status(400).json({ error: 'インポートする職員データが正しくありません。' });
+    }
+
+    try {
+        let insertCount = 0;
+        let updateCount = 0;
+
+        const importTx = db.transaction(() => {
+            staffList.forEach(s => {
+                const {
+                    employee_number, name, platoon, rank, position,
+                    has_large_license, is_paramedic, is_rescue, is_kikan,
+                    is_day_worker, role, annual_leave_balance, station_id
+                } = s;
+
+                if (!employee_number || !name || !platoon || !role || !station_id) {
+                    throw new Error(`validation_failed: 職員番号 ${employee_number || '不明'} の必須項目(氏名、部区分、権限、所属ID)が不足しています。`);
+                }
+
+                // 既存の職員番号チェック
+                const existing = db.prepare('SELECT id FROM staff WHERE employee_number = ?').get(employee_number);
+
+                if (existing) {
+                    // アップデート
+                    db.prepare(`
+                        UPDATE staff
+                        SET name = ?, station_id = ?, platoon = ?, rank = ?, position = ?,
+                            has_large_license = ?, is_paramedic = ?, is_rescue = ?, is_kikan = ?,
+                            is_day_worker = ?, role = ?, annual_leave_balance = ?, is_active = 1
+                        WHERE id = ?
+                    `).run(
+                        name,
+                        parseInt(station_id),
+                        platoon,
+                        rank || '',
+                        position || '',
+                        parseInt(has_large_license || 0) ? 1 : 0,
+                        parseInt(is_paramedic || 0) ? 1 : 0,
+                        parseInt(is_rescue || 0) ? 1 : 0,
+                        parseInt(is_kikan || 0) ? 1 : 0,
+                        parseInt(is_day_worker || 0) ? 1 : 0,
+                        role,
+                        parseFloat(annual_leave_balance || 20.0),
+                        existing.id
+                    );
+                    updateCount++;
+                } else {
+                    // 新規追加
+                    // デフォルトの暗証番号 '1234'
+                    const salt = bcrypt.genSaltSync(10);
+                    const pinHash = bcrypt.hashSync('1234', salt);
+
+                    db.prepare(`
+                        INSERT INTO staff (
+                            department_id, station_id, employee_number, pin_hash, name,
+                            platoon, rank, position, has_large_license, is_paramedic, is_rescue, is_kikan,
+                            is_day_worker, role, annual_leave_balance, is_active
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    `).run(
+                        req.user.department_id,
+                        parseInt(station_id),
+                        employee_number,
+                        pinHash,
+                        name,
+                        platoon,
+                        rank || '',
+                        position || '',
+                        parseInt(has_large_license || 0) ? 1 : 0,
+                        parseInt(is_paramedic || 0) ? 1 : 0,
+                        parseInt(is_rescue || 0) ? 1 : 0,
+                        parseInt(is_kikan || 0) ? 1 : 0,
+                        parseInt(is_day_worker || 0) ? 1 : 0,
+                        role,
+                        parseFloat(annual_leave_balance || 20.0)
+                    );
+                    insertCount++;
+                }
+            });
+        });
+
+        importTx();
+
+        // 監査ログに記録
+        db.prepare('INSERT INTO audit_logs (staff_id, action, details) VALUES (?, ?, ?)')
+            .run(req.user.id, 'import_staff_csv', `CSVインポート成功: 新規追加 ${insertCount}件, 更新 ${updateCount}件`);
+
+        res.json({ message: `CSVインポートが完了しました。新規登録: ${insertCount}件, 更新: ${updateCount}件` });
+    } catch (err) {
+        console.error(err);
+        if (err.message.startsWith('validation_failed:')) {
+            return res.status(400).json({ error: err.message.replace('validation_failed: ', '') });
+        }
+        res.status(500).json({ error: 'インポート処理中にサーバーエラーが発生しました。データ形式が正しいかご確認ください。' });
     }
 });
 

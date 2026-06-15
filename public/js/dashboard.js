@@ -231,7 +231,7 @@ const Dashboard = {
                         <button class="btn btn-primary" style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color); color:var(--text-primary); justify-content:start;" onclick="Dashboard.openWeeklyOffModal()">
                             <i data-lucide="calendar-days" style="color:var(--primary-color);"></i> 週休希望の登録・変更
                         </button>
-                        <button class="btn btn-primary" style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color); color:var(--text-primary); justify-content:start;" onclick="Portal.navigate('schedule')">
+                        <button class="btn btn-primary" style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color); color:var(--text-primary); justify-content:start;" onclick="Dashboard.openMyScheduleCalendar()">
                             <i data-lucide="calendar" style="color:var(--success);"></i> 自分の勤務シフトの確認
                         </button>
                         <div style="border-top: 1px solid rgba(255,255,255,0.06); padding-top: 14px; margin-top: 4px; display: flex; flex-direction: column; gap: 10px;">
@@ -471,7 +471,7 @@ const Dashboard = {
                         <button class="btn btn-primary" style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color); color:var(--text-primary); justify-content:start;" onclick="Dashboard.openWeeklyOffModal()">
                             <i data-lucide="calendar-days" style="color:var(--primary-color);"></i> 週休希望の登録・変更
                         </button>
-                        <button class="btn btn-primary" style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color); color:var(--text-primary); justify-content:start;" onclick="Portal.navigate('schedule')">
+                        <button class="btn btn-primary" style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color); color:var(--text-primary); justify-content:start;" onclick="Dashboard.openMyScheduleCalendar()">
                             <i data-lucide="calendar" style="color:var(--success);"></i> 自分の勤務シフトの確認
                         </button>
                         <div style="border-top: 1px solid rgba(255,255,255,0.06); padding-top: 14px; margin-top: 4px; display: flex; flex-direction: column; gap: 10px;">
@@ -677,6 +677,193 @@ const Dashboard = {
         if (input) {
             input.value = field === 'actual_clock_in' ? inVal : outVal;
         }
+    },
+
+    /**
+     * ログインユーザーの勤務カレンダーポップアップを表示
+     */
+    async openMyScheduleCalendar(yearMonth) {
+        if (!yearMonth) {
+            const now = new Date();
+            const y = now.getFullYear();
+            const m = String(now.getMonth() + 1).padStart(2, '0');
+            yearMonth = `${y}-${m}`;
+        }
+        
+        // ローディング表示
+        Portal.showModal('自分の勤務シフト確認', `
+            <div style="text-align:center; padding:40px; color:var(--text-muted);">
+                <div class="spinner" style="margin:0 auto 10px;"></div>
+                シフトデータを読み込み中...
+            </div>
+        `);
+        
+        try {
+            const response = await fetch(`/api/schedule/my-schedule?year_month=${yearMonth}`, {
+                headers: { 'Authorization': `Bearer ${Auth.token}` }
+            });
+            if (!response.ok) throw new Error('シフトデータの取得に失敗しました。');
+            
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error || 'シフトデータの取得に失敗しました。');
+            
+            this.renderMyScheduleCalendarModal(yearMonth, data.days);
+        } catch (err) {
+            Portal.showModal('自分の勤務シフト確認', `
+                <div style="text-align:center; padding:30px; color:var(--danger);">
+                    <i data-lucide="alert-triangle" style="width:24px; height:24px; margin-bottom:8px;"></i>
+                    <p>${err.message}</p>
+                </div>
+            `);
+        }
+    },
+
+    /**
+     * カレンダー表示モーダルのレンダリング
+     */
+    renderMyScheduleCalendarModal(yearMonth, days) {
+        const firstDayOfWeek = days[0].dayOfWeek;
+        
+        let gridHtml = '';
+        
+        // 曜日の位置合わせのための空マス
+        for (let i = 0; i < firstDayOfWeek; i++) {
+            gridHtml += `<div style="background:transparent; border:1px solid transparent; min-height:80px;"></div>`;
+        }
+        
+        // 日付セルの生成
+        days.forEach(item => {
+            const isSunday = (item.dayOfWeek === 0);
+            const isSaturday = (item.dayOfWeek === 6);
+            const isHoliday = !!item.holidayName;
+            
+            let cellStyle = 'background:var(--bg-card); border:1px solid var(--border-color); color:var(--text-primary);';
+            let shiftBadge = '';
+            
+            const shiftColors = {
+                "当": { bg: "rgba(224, 242, 254, 0.5)", border: "#0284c7", color: "#0369a1", name: "当務" },
+                "明": { bg: "rgba(243, 244, 246, 0.5)", border: "#d1d5db", color: "#4b5563", name: "非番" },
+                "非": { bg: "rgba(243, 244, 246, 0.5)", border: "#d1d5db", color: "#4b5563", name: "非番" },
+                "週": { bg: "rgba(254, 243, 199, 0.5)", border: "#f59e0b", color: "#d97706", name: "週休" },
+                "休": { bg: "rgba(254, 243, 199, 0.5)", border: "#f59e0b", color: "#d97706", name: "休日" },
+                "有": { bg: "rgba(220, 252, 231, 0.5)", border: "#22c55e", color: "#15803d", name: "年休" },
+                "公": { bg: "rgba(243, 232, 255, 0.5)", border: "#a855f7", color: "#6b21a8", name: "公休" },
+                "張": { bg: "rgba(226, 240, 253, 0.5)", border: "#3b82f6", color: "#2563eb", name: "出張" },
+                "特": { bg: "rgba(254, 226, 226, 0.5)", border: "#ef4444", color: "#dc2626", name: "特休" },
+                "病": { bg: "rgba(255, 237, 213, 0.5)", border: "#f97316", color: "#ea580c", name: "病休" }
+            };
+            
+            const colorMeta = shiftColors[item.shiftKey];
+            if (colorMeta) {
+                cellStyle = `background:${colorMeta.bg}; border:1.5px solid ${colorMeta.border}; color:${colorMeta.color};`;
+                shiftBadge = `<span style="display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:bold; background:${colorMeta.color}; color:#fff; padding:2px 6px; border-radius:4px; margin-top:4px; width:fit-content;">${colorMeta.name}</span>`;
+            }
+            
+            if (item.leaveType) {
+                const leaveNames = {
+                    "annual": "年休",
+                    "weekly_off": "週休希望",
+                    "special": "特休",
+                    "sick": "病休",
+                    "other": "その他"
+                };
+                const leaveName = leaveNames[item.leaveType] || "休暇";
+                shiftBadge += `<span style="display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:bold; background:#ea580c; color:#fff; padding:2px 6px; border-radius:4px; margin-top:4px; width:fit-content;" title="${item.leaveReason || ''}">${leaveName}</span>`;
+            }
+            
+            let holidayHtml = '';
+            if (isHoliday) {
+                holidayHtml = `<span style="font-size:9px; color:#ef4444; font-weight:600; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-align:left; width:100%; margin-top:2px;" title="${item.holidayName}">${item.holidayName}</span>`;
+            }
+            
+            let dateColor = 'var(--text-primary)';
+            if (isSunday || isHoliday) {
+                dateColor = '#ef4444';
+            } else if (isSaturday) {
+                dateColor = '#3b82f6';
+            }
+            
+            gridHtml += `
+                <div class="calendar-day-cell" style="min-height:80px; padding:6px; border-radius:8px; display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; position:relative; box-sizing:border-box; ${cellStyle}">
+                    <span style="font-size:13px; font-weight:700; color:${dateColor};">${item.day}</span>
+                    ${holidayHtml}
+                    <div style="display:flex; flex-direction:column; gap:2px; width:100%; margin-top:auto; align-items:flex-start;">
+                        ${shiftBadge}
+                    </div>
+                </div>
+            `;
+        });
+        
+        const [year, month] = yearMonth.split('-');
+        
+        const dateObj = new Date(parseInt(year), parseInt(month) - 1, 1);
+        const prevMonthDate = new Date(dateObj);
+        prevMonthDate.setMonth(dateObj.getMonth() - 1);
+        const nextMonthDate = new Date(dateObj);
+        nextMonthDate.setMonth(dateObj.getMonth() + 1);
+        
+        const prevYearMonth = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
+        const nextYearMonth = `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth() + 1).padStart(2, '0')}`;
+        
+        const title = `${Auth.user.name} 職員の勤務カレンダー`;
+        
+        const content = `
+            <div style="display:flex; flex-direction:column; gap:16px; min-width:320px; max-width:700px; width:100%; box-sizing:border-box;">
+                <!-- ヘッダー・月切替 -->
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; flex-wrap:wrap; gap:8px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <button class="btn btn-secondary" onclick="Dashboard.openMyScheduleCalendar('${prevYearMonth}')" style="padding:4px 8px; height:28px; font-size:12px; display:flex; align-items:center; justify-content:center; cursor:pointer; gap:4px;">
+                            <i data-lucide="chevron-left" style="width:14px; height:14px;"></i>前月
+                        </button>
+                        <strong style="font-size:16px; color:var(--text-primary); min-width:110px; text-align:center;">${year}年 ${parseInt(month)}月</strong>
+                        <button class="btn btn-secondary" onclick="Dashboard.openMyScheduleCalendar('${nextYearMonth}')" style="padding:4px 8px; height:28px; font-size:12px; display:flex; align-items:center; justify-content:center; cursor:pointer; gap:4px;">
+                            翌月<i data-lucide="chevron-right" style="width:14px; height:14px;"></i>
+                        </button>
+                    </div>
+                    
+                    <div>
+                        <input type="month" id="personal-calendar-month-select" value="${yearMonth}" class="form-input" style="padding:2px 8px; height:28px; font-size:12px; width:130px; border-radius:6px; border:1px solid var(--border-color);" onchange="Dashboard.openMyScheduleCalendar(this.value)">
+                    </div>
+                </div>
+                
+                <!-- カレンダー表示部 -->
+                <div>
+                    <!-- 曜日ヘッダー -->
+                    <div style="display:grid; grid-template-columns: repeat(7, 1fr); gap:6px; text-align:center; font-weight:700; font-size:12px; margin-bottom:8px; border-bottom:2px solid var(--border-color); padding-bottom:4px;">
+                        <div style="color:#ef4444;">日</div>
+                        <div>月</div>
+                        <div>火</div>
+                        <div>水</div>
+                        <div>木</div>
+                        <div>金</div>
+                        <div style="color:#3b82f6;">土</div>
+                    </div>
+                    
+                    <!-- 日付マス -->
+                    <div style="display:grid; grid-template-columns: repeat(7, 1fr); gap:6px;">
+                        ${gridHtml}
+                    </div>
+                </div>
+                
+                <!-- 凡例 -->
+                <div style="display:flex; flex-wrap:wrap; gap:12px; padding:10px 14px; background:var(--secondary-bg); border:1px solid var(--border-color); border-radius:8px; font-size:11px; color:var(--text-secondary);">
+                    <div style="display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:rgba(224, 242, 254, 0.5); border:1px solid #0284c7;"></span> 当務</div>
+                    <div style="display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:rgba(243, 244, 246, 0.5); border:1px solid #d1d5db;"></span> 非番</div>
+                    <div style="display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:rgba(254, 243, 199, 0.5); border:1px solid #f59e0b;"></span> 週休/休日</div>
+                    <div style="display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:rgba(220, 252, 231, 0.5); border:1px solid #22c55e;"></span> 年休</div>
+                    <div style="display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:rgba(243, 232, 255, 0.5); border:1px solid #a855f7;"></span> 公休</div>
+                    <div style="display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:rgba(226, 240, 253, 0.5); border:1px solid #3b82f6;"></span> 出張</div>
+                    <div style="display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:rgba(254, 226, 226, 0.5); border:1px solid #ef4444;"></span> 特休</div>
+                    <div style="display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:rgba(255, 237, 213, 0.5); border:1px solid #f97316;"></span> 病休</div>
+                </div>
+                
+                <div style="display:flex; justify-content:flex-end;">
+                    <button class="btn btn-secondary" onclick="Portal.closeModal()" style="padding:6px 20px; font-size:13px; cursor:pointer;">閉じる</button>
+                </div>
+            </div>
+        `;
+        
+        Portal.showModal(title, content);
     },
 
     /**

@@ -575,6 +575,7 @@ const Portal = {
     },
 
     // 職員管理画面 (一覧 & 新規・更新)
+    // 職員管理画面 (一覧 & 新規・更新)
     async renderStaffAdminPage(container) {
         const response = await fetch('/api/admin/staff', {
             headers: { 'Authorization': `Bearer ${Auth.token}` }
@@ -586,6 +587,7 @@ const Portal = {
                 <td>${member.employee_number}</td>
                 <td>${member.name}</td>
                 <td>${member.rank || '-'}</td>
+                <td><span class="staff-position-badge ${Portal.getPositionClass(member.position)}">${member.position || '-'}</span></td>
                 <td>${member.station_name}</td>
                 <td>${member.platoon === '1bu' ? 'A日 (1部)' : member.platoon === '2bu' ? 'B日 (2部)' : member.platoon === '3bu' ? 'C日 (3部)' : '日勤'}</td>
                 <td>${member.role === 'sysadmin' ? 'システム管理者' : member.role === 'admin' ? '本部管理者' : member.role === 'chief' ? '当直頭/署長' : '一般職員'}</td>
@@ -600,13 +602,24 @@ const Portal = {
         
         container.innerHTML = `
             <div class="card">
-                <div style="display:flex; justify-content:between; align-items:center; margin-bottom:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:12px;">
                     <div>
                         <h3>職員名簿管理</h3>
-                        <p style="color:var(--text-secondary)">消防職員の所属、部区分、階級、システム権限等のマスタ情報を管理します。</p>
+                        <p style="color:var(--text-secondary)">消防職員の所属、部区分、階級、隊、システム権限等のマスタ情報を管理します。</p>
                     </div>
                     ${Auth.hasRole('admin', 'sysadmin') ? `
-                        <button class="btn btn-primary" onclick="Portal.openStaffAddModal()" style="margin-left:auto;">新規職員登録</button>
+                        <div style="display:flex; gap:8px; margin-left:auto; align-items:center;">
+                            <div style="display:flex; align-items:center; gap:4px; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); padding:4px 8px; border-radius:6px; font-size:12px;">
+                                <label style="font-weight:600; cursor:pointer;" for="csv-file-input">CSVインポート:</label>
+                                <input type="file" id="csv-file-input" accept=".csv" style="display:none;" onchange="Portal.handleCSVImport(event)">
+                                <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('csv-file-input').click()">ファイル選択</button>
+                                <select id="csv-encoding" style="font-size:11px; padding:2px; background:transparent; border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+                                    <option value="shift-jis">Shift_JIS (Excel)</option>
+                                    <option value="utf-8">UTF-8</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-primary" onclick="Portal.openStaffAddModal()">新規職員登録</button>
+                        </div>
                     ` : ''}
                 </div>
                 <div class="table-responsive">
@@ -616,6 +629,7 @@ const Portal = {
                                 <th>職員番号</th>
                                 <th>氏名</th>
                                 <th>階級</th>
+                                <th>隊</th>
                                 <th>所属</th>
                                 <th>勤務区分</th>
                                 <th>システム役割</th>
@@ -630,6 +644,187 @@ const Portal = {
                 </div>
             </div>
         `;
+    },
+
+    getPositionClass(pos) {
+        if (["小隊長", "消防隊長", "消防副", "消防隊"].includes(pos)) return "pos-fire";
+        if (["救急隊長", "救急副", "救急隊"].includes(pos)) return "pos-ambulance";
+        if (["救助隊長", "救助副", "救助隊"].includes(pos)) return "pos-rescue";
+        return "pos-general";
+    },
+
+    getPositionOptions(rank) {
+        if (rank === "消防司令" || rank === "消防司令補") {
+            return ["", "小隊長", "消防隊長", "救急隊長", "救助隊長", "庶務経理", "主幹"];
+        } else {
+            return ["", "消防隊", "救急隊", "救助隊"];
+        }
+    },
+
+    async handleCSVImport(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const encoding = document.getElementById('csv-encoding').value;
+        const reader = new FileReader();
+        
+        reader.onload = async (e) => {
+            const text = e.target.result;
+            try {
+                const staffList = Portal.parseCSV(text);
+                if (staffList.length === 0) {
+                    Portal.showToast('CSVデータが空か、解析に失敗しました。', 'error');
+                    return;
+                }
+                
+                const confirmed = confirm(`CSVから ${staffList.length} 件の職員データをインポートしますか？\n（既存の職員番号は上書き更新されます）`);
+                if (!confirmed) {
+                    event.target.value = '';
+                    return;
+                }
+                
+                const response = await fetch('/api/admin/staff/import', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${Auth.token}`
+                    },
+                    body: JSON.stringify({ staffList })
+                });
+                
+                const data = await response.json();
+                if (response.ok) {
+                    Portal.showToast(data.message, 'success');
+                    Portal.navigate('staff_admin');
+                } else {
+                    Portal.showToast(data.error || 'インポートに失敗しました。', 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                Portal.showToast(err.message || 'CSVの解析に失敗しました。', 'error');
+            }
+            event.target.value = '';
+        };
+        
+        reader.onerror = () => {
+            Portal.showToast('ファイルの読み込みに失敗しました。', 'error');
+            event.target.value = '';
+        };
+        
+        if (encoding === 'shift-jis') {
+            reader.readAsText(file, 'Shift_JIS');
+        } else {
+            reader.readAsText(file, 'UTF-8');
+        }
+    },
+
+    parseCSV(text) {
+        const lines = text.split(/\r?\n/);
+        if (lines.length < 2) return [];
+        
+        const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
+        
+        const fieldMapping = {
+            'employee_number': ['職員番号', 'employee_number'],
+            'name': ['氏名', 'name'],
+            'platoon': ['勤務区分(platoon)', '勤務区分', 'platoon'],
+            'rank': ['階級', 'rank'],
+            'position': ['隊(position)', '隊', '役職(position)', '役職', 'position'],
+            'has_large_license': ['大型免許', 'has_large_license'],
+            'is_paramedic': ['救命士', 'is_paramedic'],
+            'is_rescue': ['救助員', 'is_rescue'],
+            'is_kikan': ['機関員', 'is_kikan'],
+            'is_day_worker': ['日勤', 'is_day_worker'],
+            'role': ['システム役割(role)', 'システム役割', 'role'],
+            'annual_leave_balance': ['年休残日数', 'annual_leave_balance'],
+            'station_id': ['所属署所ID(station_id)', '所属署所ID', 'station_id']
+        };
+
+        const headerIndices = {};
+        for (const key in fieldMapping) {
+            const possibleNames = fieldMapping[key];
+            const idx = headers.findIndex(h => possibleNames.some(pName => h === pName || h.toLowerCase() === pName.toLowerCase()));
+            headerIndices[key] = idx;
+        }
+
+        const requiredKeys = ['employee_number', 'name', 'platoon', 'role', 'station_id'];
+        const missingKeys = requiredKeys.filter(k => headerIndices[k] === -1);
+        if (missingKeys.length > 0) {
+            throw new Error(`CSVのヘッダーに必要な項目が不足しています。不足: ${missingKeys.map(k => fieldMapping[k][0]).join(', ')}`);
+        }
+
+        const staffList = [];
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            
+            const values = [];
+            let currentVal = '';
+            let inQuotes = false;
+            for (let c = 0; c < line.length; c++) {
+                const char = line[c];
+                if (char === '"' || char === "'") {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    values.push(currentVal.trim());
+                    currentVal = '';
+                } else {
+                    currentVal += char;
+                }
+            }
+            values.push(currentVal.trim());
+
+            if (values.length < headers.length) {
+                continue;
+            }
+
+            const getVal = (key, defaultVal = '') => {
+                const idx = headerIndices[key];
+                if (idx === -1 || idx === undefined || values[idx] === undefined) return defaultVal;
+                return values[idx].replace(/^["']|["']$/g, '');
+            };
+
+            const employee_number = getVal('employee_number');
+            const name = getVal('name');
+            let platoon = getVal('platoon');
+            const rank = getVal('rank');
+            const position = getVal('position');
+            const has_large_license = parseInt(getVal('has_large_license', '0')) ? 1 : 0;
+            const is_paramedic = parseInt(getVal('is_paramedic', '0')) ? 1 : 0;
+            const is_rescue = parseInt(getVal('is_rescue', '0')) ? 1 : 0;
+            const is_kikan = parseInt(getVal('is_kikan', '0')) ? 1 : 0;
+            const is_day_worker = parseInt(getVal('is_day_worker', '0')) ? 1 : 0;
+            let role = getVal('role');
+            const annual_leave_balance = parseFloat(getVal('annual_leave_balance', '20.0'));
+            const station_id = parseInt(getVal('station_id'));
+
+            if (platoon === '1部' || platoon === '第1小隊') platoon = '1bu';
+            else if (platoon === '2部' || platoon === '第2小隊') platoon = '2bu';
+            else if (platoon === '3部' || platoon === '第3小隊') platoon = '3bu';
+            else if (platoon === '日勤者') platoon = 'nikkin';
+
+            if (role === '一般職員' || role === '一般') role = 'staff';
+            else if (role === '当直頭' || role === '署長') role = 'chief';
+            else if (role === '本部管理者' || role === '管理者') role = 'admin';
+            else if (role === 'システム管理者') role = 'sysadmin';
+
+            staffList.push({
+                employee_number,
+                name,
+                platoon,
+                rank,
+                position,
+                has_large_license,
+                is_paramedic,
+                is_rescue,
+                is_kikan,
+                is_day_worker,
+                role,
+                annual_leave_balance,
+                station_id
+            });
+        }
+        return staffList;
     },
 
     openStaffAddModal() {
@@ -666,7 +861,27 @@ const Portal = {
                 </div>
                 <div class="form-group" style="margin-bottom:12px;">
                     <label class="form-label">階級</label>
-                    <input class="form-input" style="padding-left:12px;" type="text" id="member-rank" placeholder="例: 消防士長">
+                    <select class="form-input" style="padding-left:12px;" id="member-rank" required>
+                        <option value="消防司令">消防司令</option>
+                        <option value="消防司令補">消防司令補</option>
+                        <option value="消防士長">消防士長</option>
+                        <option value="消防副士長">消防副士長</option>
+                        <option value="消防士" selected>消防士</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom:12px;">
+                    <label class="form-label">隊</label>
+                    <select class="form-input" style="padding-left:12px;" id="member-position" required>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom:12px;">
+                    <label class="form-label">資格設定</label>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                        <label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;"><input type="checkbox" id="member-large"> 大型</label>
+                        <label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;"><input type="checkbox" id="member-paramedic"> 救命士</label>
+                        <label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;"><input type="checkbox" id="member-kikan"> 機関員</label>
+                        <label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;"><input type="checkbox" id="member-day_worker"> 日勤</label>
+                    </div>
                 </div>
                 <div class="form-group" style="margin-bottom:12px;">
                     <label class="form-label">システム権限</label>
@@ -685,6 +900,24 @@ const Portal = {
             </form>
         `;
         this.showModal('新規職員登録', content);
+        
+        const rankSel = document.getElementById('member-rank');
+        const posSel = document.getElementById('member-position');
+        if (rankSel && posSel) {
+            const updateOptions = () => {
+                const selectedRank = rankSel.value;
+                posSel.innerHTML = '';
+                const opts = Portal.getPositionOptions(selectedRank);
+                opts.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p;
+                    opt.textContent = p === "" ? "未選択" : p;
+                    posSel.appendChild(opt);
+                });
+            };
+            rankSel.addEventListener('change', updateOptions);
+            updateOptions();
+        }
     },
 
     openStaffEditModal(member) {
@@ -721,7 +954,27 @@ const Portal = {
                 </div>
                 <div class="form-group" style="margin-bottom:12px;">
                     <label class="form-label">階級</label>
-                    <input class="form-input" style="padding-left:12px;" type="text" id="member-rank" value="${member.rank || ''}">
+                    <select class="form-input" style="padding-left:12px;" id="member-rank" required>
+                        <option value="消防司令" ${member.rank === '消防司令' ? 'selected' : ''}>消防司令</option>
+                        <option value="消防司令補" ${member.rank === '消防司令補' ? 'selected' : ''}>消防司令補</option>
+                        <option value="消防士長" ${member.rank === '消防士長' ? 'selected' : ''}>消防士長</option>
+                        <option value="消防副士長" ${member.rank === '消防副士長' ? 'selected' : ''}>消防副士長</option>
+                        <option value="消防士" ${member.rank === '消防士' ? 'selected' : ''}>消防士</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom:12px;">
+                    <label class="form-label">隊</label>
+                    <select class="form-input" style="padding-left:12px;" id="member-position" required>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom:12px;">
+                    <label class="form-label">資格設定</label>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                        <label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;"><input type="checkbox" id="member-large" ${member.has_large_license ? 'checked' : ''}> 大型</label>
+                        <label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;"><input type="checkbox" id="member-paramedic" ${member.is_paramedic ? 'checked' : ''}> 救命士</label>
+                        <label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;"><input type="checkbox" id="member-kikan" ${member.is_kikan ? 'checked' : ''}> 機関員</label>
+                        <label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;"><input type="checkbox" id="member-day_worker" ${member.is_day_worker ? 'checked' : ''}> 日勤</label>
+                    </div>
                 </div>
                 <div class="form-group" style="margin-bottom:12px;">
                     <label class="form-label">システム権限</label>
@@ -747,6 +1000,25 @@ const Portal = {
             </form>
         `;
         this.showModal('職員情報の編集', content);
+        
+        const rankSel = document.getElementById('member-rank');
+        const posSel = document.getElementById('member-position');
+        if (rankSel && posSel) {
+            const updateOptions = () => {
+                const selectedRank = rankSel.value;
+                posSel.innerHTML = '';
+                const opts = Portal.getPositionOptions(selectedRank);
+                opts.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p;
+                    opt.textContent = p === "" ? "未選択" : p;
+                    if (p === member.position) opt.selected = true;
+                    posSel.appendChild(opt);
+                });
+            };
+            rankSel.addEventListener('change', updateOptions);
+            updateOptions();
+        }
     },
 
     async handleStaffSubmit(event, action, staffId = null) {
@@ -756,9 +1028,15 @@ const Portal = {
             name: document.getElementById('member-name').value.trim(),
             station_id: parseInt(document.getElementById('member-station_id').value),
             platoon: document.getElementById('member-platoon').value,
-            rank: document.getElementById('member-rank').value.trim(),
+            rank: document.getElementById('member-rank').value,
+            position: document.getElementById('member-position').value,
             role: document.getElementById('member-role').value,
-            annual_leave_balance: parseFloat(document.getElementById('member-annual_leave_balance').value)
+            annual_leave_balance: parseFloat(document.getElementById('member-annual_leave_balance').value),
+            has_large_license: document.getElementById('member-large').checked ? 1 : 0,
+            is_paramedic: document.getElementById('member-paramedic').checked ? 1 : 0,
+            is_rescue: ["救助隊", "救助副", "救助隊長", "小隊長", "主幹"].includes(document.getElementById('member-position').value) ? 1 : 0,
+            is_kikan: document.getElementById('member-kikan').checked ? 1 : 0,
+            is_day_worker: document.getElementById('member-day_worker').checked ? 1 : 0
         };
         
         const pinEl = document.getElementById('member-pin');

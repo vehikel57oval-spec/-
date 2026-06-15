@@ -69,8 +69,28 @@ function processSupportStaff(staffList, station_id, departmentId) {
             let dbId;
             if (existing) {
                 dbId = existing.id;
-                // もし非アクティブ化されていたらアクティブに戻す
-                db.prepare('UPDATE staff SET is_active = 1 WHERE id = ?').run(dbId);
+                // もし非アクティブ化されていたらアクティブに戻す。また、最新の資格や階級・役職を更新する
+                db.prepare(`
+                    UPDATE staff 
+                    SET is_active = 1,
+                        platoon = ?,
+                        rank = ?,
+                        position = ?,
+                        has_large_license = ?,
+                        is_paramedic = ?,
+                        is_rescue = ?,
+                        is_kikan = ?
+                    WHERE id = ?
+                `).run(
+                    s.platoon === 1 ? '1bu' : (s.platoon === 2 ? '2bu' : 'nikkin'),
+                    s.rank || '',
+                    s.position || '',
+                    s.hasLargeLicense ? 1 : 0,
+                    s.isParamedic ? 1 : 0,
+                    s.isRescue ? 1 : 0,
+                    s.isKikan ? 1 : 0,
+                    dbId
+                );
             } else {
                 // 応援職員として新規にマスタ登録
                 const employeeNumber = 'SUP-' + Math.random().toString(36).substr(2, 9).toUpperCase();
@@ -80,9 +100,9 @@ function processSupportStaff(staffList, station_id, departmentId) {
                 const info = db.prepare(`
                     INSERT INTO staff (
                         department_id, station_id, employee_number, pin_hash, name,
-                        platoon, rank, has_large_license, is_paramedic, is_rescue, is_kikan,
+                        platoon, rank, position, has_large_license, is_paramedic, is_rescue, is_kikan,
                         is_day_worker, role, annual_leave_balance, is_active
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 20.0, 1)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 20.0, 1)
                 `).run(
                     departmentId,
                     station_id,
@@ -91,6 +111,7 @@ function processSupportStaff(staffList, station_id, departmentId) {
                     s.name,
                     platoonVal,
                     s.rank || '',
+                    s.position || '',
                     s.hasLargeLicense ? 1 : 0,
                     s.isParamedic ? 1 : 0,
                     s.isRescue ? 1 : 0,
@@ -130,6 +151,7 @@ function saveStaffOverrides(staffList, station_id, cycle_number, start_date) {
         // 比較用にフォーマットを統一
         const masterPlatoon = master.platoon === '1bu' ? 1 : (master.platoon === '2bu' ? 2 : 0);
         const masterRank = master.rank || '';
+        const masterPosition = master.position || '';
         const masterHasLarge = !!master.has_large_license;
         const masterIsParamedic = !!master.is_paramedic;
         const masterIsRescue = !!master.is_rescue;
@@ -138,6 +160,7 @@ function saveStaffOverrides(staffList, station_id, cycle_number, start_date) {
 
         const currentPlatoon = parseInt(s.platoon);
         const currentRank = s.rank || '';
+        const currentPosition = s.position || '';
         const currentHasLarge = !!s.hasLargeLicense;
         const currentIsParamedic = !!s.isParamedic;
         const currentIsRescue = !!s.isRescue;
@@ -147,6 +170,7 @@ function saveStaffOverrides(staffList, station_id, cycle_number, start_date) {
         const hasOverride = (
             masterPlatoon !== currentPlatoon ||
             masterRank !== currentRank ||
+            masterPosition !== currentPosition ||
             masterHasLarge !== currentHasLarge ||
             masterIsParamedic !== currentIsParamedic ||
             masterIsRescue !== currentIsRescue ||
@@ -159,8 +183,8 @@ function saveStaffOverrides(staffList, station_id, cycle_number, start_date) {
             db.prepare(`
                 INSERT OR REPLACE INTO schedule_staff_overrides (
                     cycle_number, start_date, station_id, staff_id,
-                    platoon, rank, has_large_license, is_paramedic, is_rescue, is_kikan, is_day_worker
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    platoon, rank, position, has_large_license, is_paramedic, is_rescue, is_kikan, is_day_worker
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
                 cycle_number,
                 start_date,
@@ -168,6 +192,7 @@ function saveStaffOverrides(staffList, station_id, cycle_number, start_date) {
                 parseInt(sIdStr),
                 platoonVal,
                 currentRank,
+                currentPosition,
                 currentHasLarge ? 1 : 0,
                 currentIsParamedic ? 1 : 0,
                 currentIsRescue ? 1 : 0,
@@ -194,6 +219,80 @@ function getEndDateStr(startDateStr) {
     const d = String(end.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
 }
+
+/**
+ * @route   GET /api/schedule/my-schedule
+ * @desc    ログインユーザーの当月のスケジュールをカレンダー表示用に取得
+ */
+router.get('/my-schedule', verifyToken, (req, res) => {
+    const { getJapaneseHoliday } = require('../utils/holidays');
+    const staffId = req.user.id;
+    const yearMonth = req.query.year_month; // YYYY-MM
+    
+    if (!yearMonth) {
+        return res.status(400).json({ error: '年月を指定してください。' });
+    }
+    
+    try {
+        const startDate = `${yearMonth}-01`;
+        const [year, month] = yearMonth.split('-').map(Number);
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const endDate = `${yearMonth}-${String(daysInMonth).padStart(2, '0')}`;
+        
+        // 1. スケジュールエントリーの取得
+        const entries = db.prepare(`
+            SELECT work_date, shift_key, start_time, end_time 
+            FROM schedule_entries 
+            WHERE staff_id = ? AND work_date BETWEEN ? AND ?
+        `).all(staffId, startDate, endDate);
+        
+        // 2. 休暇申請（承認済）の取得
+        const leaves = db.prepare(`
+            SELECT start_date, end_date, leave_type, reason
+            FROM leave_requests
+            WHERE staff_id = ? AND status = 'approved' AND (start_date <= ? AND end_date >= ?)
+        `).all(staffId, endDate, startDate);
+        
+        // 3. 日付ごとのスケジュール・休暇情報のマッピング
+        const days = [];
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dayStr = `${yearMonth}-${String(day).padStart(2, '0')}`;
+            const dateObj = new Date(year, month - 1, day);
+            const holidayName = getJapaneseHoliday(dateObj) || null;
+            
+            // シフトの検索
+            const entry = entries.find(e => e.work_date === dayStr);
+            const shiftKey = entry ? entry.shift_key : '-';
+            const startTime = entry ? entry.start_time : null;
+            const endTime = entry ? entry.end_time : null;
+            
+            // 休暇の検索
+            const leave = leaves.find(l => dayStr >= l.start_date && dayStr <= l.end_date);
+            const leaveType = leave ? leave.leave_type : null;
+            const leaveReason = leave ? leave.reason : null;
+            
+            days.push({
+                date: dayStr,
+                day,
+                dayOfWeek: dateObj.getDay(),
+                holidayName,
+                shiftKey,
+                startTime,
+                endTime,
+                leaveType,
+                leaveReason
+            });
+        }
+        
+        res.json({
+            success: true,
+            days
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
 
 /**
  * @route   GET /api/schedule/roster
@@ -242,6 +341,7 @@ router.get('/roster', verifyToken, (req, res) => {
             // デフォルトはマスタの値
             let platoon = s.platoon === '1bu' ? 1 : (s.platoon === '2bu' ? 2 : 0);
             let rank = s.rank;
+            let position = s.position || '';
             let hasLargeLicense = !!s.has_large_license;
             let isParamedic = !!s.is_paramedic;
             let isRescue = !!s.is_rescue;
@@ -255,6 +355,7 @@ router.get('/roster', verifyToken, (req, res) => {
                     platoon = override.platoon === '1bu' ? 1 : (override.platoon === '2bu' ? 2 : (override.platoon === 1 ? 1 : (override.platoon === 2 ? 2 : 0)));
                 }
                 if (override.rank !== undefined && override.rank !== null) rank = override.rank;
+                if (override.position !== undefined && override.position !== null) position = override.position;
                 if (override.has_large_license !== undefined && override.has_large_license !== null) hasLargeLicense = !!override.has_large_license;
                 if (override.is_paramedic !== undefined && override.is_paramedic !== null) isParamedic = !!override.is_paramedic;
                 if (override.is_rescue !== undefined && override.is_rescue !== null) isRescue = !!override.is_rescue;
@@ -267,6 +368,7 @@ router.get('/roster', verifyToken, (req, res) => {
                 name: s.name,
                 platoon,
                 rank,
+                position,
                 hasLargeLicense,
                 isParamedic,
                 isRescue,
