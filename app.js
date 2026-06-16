@@ -685,9 +685,18 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     bindEvents();
     
-    // 初期表示として自動的に今日の日付を設定して描画
-    const today = new Date();
-    document.getElementById('input-start-date').value = today.toISOString().split('T')[0];
+    // 初期表示として自動的に今日の日付（または保存された値）を設定して描画
+    const savedStartDate = localStorage.getItem('fire_dept_start_date');
+    const savedCycle = localStorage.getItem('fire_dept_cycle');
+    
+    if (savedCycle) {
+        state.activeCycle = parseInt(savedCycle, 10);
+        const elSelectCycle = document.getElementById('select-cycle');
+        if (elSelectCycle) elSelectCycle.value = savedCycle;
+    }
+    
+    const defaultDateStr = savedStartDate || new Date().toISOString().split('T')[0];
+    document.getElementById('input-start-date').value = defaultDateStr;
     handleDateChange();
     
     // 署所名のデフォルト表示
@@ -1231,8 +1240,8 @@ function renderStaffInputs() {
 function handleDateChange() {
     const val = document.getElementById('input-start-date').value;
     if (!val) return;
-    
     state.startDate = new Date(val);
+    localStorage.setItem('fire_dept_start_date', val);
     
     // アクティブなサイクルの開始日と終了日を計算
     const activeStartDate = new Date(state.startDate);
@@ -1657,6 +1666,7 @@ function bindEvents() {
     // サイクル変更
     document.getElementById('select-cycle').addEventListener('change', (e) => {
         state.activeCycle = parseInt(e.target.value);
+        localStorage.setItem('fire_dept_cycle', state.activeCycle);
         handleDateChange();
     });
 

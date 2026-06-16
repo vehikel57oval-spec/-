@@ -841,6 +841,8 @@ async function saveDraft() {
         });
         const data = await response.json();
         if (response.ok) {
+            localStorage.setItem('fire_dept_start_date', state.startDate);
+            localStorage.setItem('fire_dept_cycle', state.activeCycle);
             Portal.showToast(data.message, 'success');
         } else {
             Portal.showToast(data.error, 'error');
@@ -886,6 +888,8 @@ async function confirmSchedule() {
         });
         const data = await response.json();
         if (response.ok) {
+            localStorage.setItem('fire_dept_start_date', state.startDate);
+            localStorage.setItem('fire_dept_cycle', state.activeCycle);
             Portal.showToast(data.message, 'success');
             state.isConfirmed = true;
             refreshUI();
@@ -1390,10 +1394,15 @@ async function render(container) {
     state.stationId = Auth.user.station_id;
     state.userRole = Auth.hasRole('chief', 'admin', 'sysadmin') ? 'admin' : 'viewer';
 
-    // 起算日の初期値（今日の日付）
-    const today = new Date();
-    state.startDate = formatDateLocal(today);
+    // 起算日とサイクルの初期値 (保存された下書きの選択状態を復元)
+    const savedStartDate = localStorage.getItem('fire_dept_start_date');
+    const savedCycle = localStorage.getItem('fire_dept_cycle');
+    
+    state.startDate = savedStartDate || formatDateLocal(new Date());
+    state.activeCycle = savedCycle ? parseInt(savedCycle, 10) : 1;
+
     document.getElementById('input-start-date').value = state.startDate;
+    document.getElementById('select-cycle').value = state.activeCycle;
     document.getElementById('input-station').value = state.station;
 
     // APIからデータロード
@@ -1967,11 +1976,16 @@ function renderStaffInputs() {
 }
 
 // 日付変更時の処理
-function handleDateChange() {
+async function handleDateChange(skipFetch = false) {
     const val = document.getElementById('input-start-date').value;
     if (!val) return;
     
     state.startDate = val;
+    localStorage.setItem('fire_dept_start_date', val);
+    
+    if (skipFetch !== true) {
+        await loadDataFromAPI();
+    }
     
     // アクティブなサイクルの開始日と終了日を計算
     const activeStartDate = new Date(state.startDate);
@@ -2359,9 +2373,10 @@ function bindEvents() {
     }
 
     // サイクル変更
-    document.getElementById('select-cycle').addEventListener('change', (e) => {
+    document.getElementById('select-cycle').addEventListener('change', async (e) => {
         state.activeCycle = parseInt(e.target.value);
-        handleDateChange();
+        localStorage.setItem('fire_dept_cycle', state.activeCycle);
+        await handleDateChange();
     });
 
     // 希望休クリア (アクティブサイクルのみ)
@@ -2763,7 +2778,7 @@ function bindEvents() {
                         });
                     }
                     
-                    handleDateChange();
+                    handleDateChange(true);
                     await showCustomAlert("設定データを読み込みました。");
                 } catch (err) {
                     await showCustomAlert(`ファイルのパースに失敗しました: ${err.message}`);
@@ -4985,7 +5000,7 @@ function bindVehicleEvents() {
     // 日付選択の変更
     const dateSelect = document.getElementById('vehicle-date-select');
     if (dateSelect) {
-        dateSelect.addEventListener('change', (e) => {
+        dateSelect.addEventListener('change', async (e) => {
             let date = new Date(e.target.value);
             if (isNaN(date.getTime())) {
                 date = new Date(state.startDate);
@@ -4998,7 +5013,7 @@ function bindVehicleEvents() {
             if (state.activeCycle !== cycle) {
                 state.activeCycle = cycle;
                 document.getElementById('select-cycle').value = cycle;
-                handleDateChange();
+                await handleDateChange();
             }
             renderVehicleView();
         });
@@ -5007,7 +5022,7 @@ function bindVehicleEvents() {
     // 前日ボタン
     const btnPrev = document.getElementById('btn-vehicle-prev-day');
     if (btnPrev) {
-        btnPrev.addEventListener('click', () => {
+        btnPrev.addEventListener('click', async () => {
             const currentStr = document.getElementById('vehicle-date-select').value;
             if (!currentStr) return;
             let date = new Date(currentStr);
@@ -5020,7 +5035,7 @@ function bindVehicleEvents() {
             if (state.activeCycle !== cycle) {
                 state.activeCycle = cycle;
                 document.getElementById('select-cycle').value = cycle;
-                handleDateChange();
+                await handleDateChange();
             }
             renderVehicleView();
         });
@@ -5029,7 +5044,7 @@ function bindVehicleEvents() {
     // 翌日ボタン
     const btnNext = document.getElementById('btn-vehicle-next-day');
     if (btnNext) {
-        btnNext.addEventListener('click', () => {
+        btnNext.addEventListener('click', async () => {
             const currentStr = document.getElementById('vehicle-date-select').value;
             if (!currentStr) return;
             let date = new Date(currentStr);
@@ -5042,7 +5057,7 @@ function bindVehicleEvents() {
             if (state.activeCycle !== cycle) {
                 state.activeCycle = cycle;
                 document.getElementById('select-cycle').value = cycle;
-                handleDateChange();
+                await handleDateChange();
             }
             renderVehicleView();
         });
