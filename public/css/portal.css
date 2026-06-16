@@ -1872,7 +1872,7 @@ h1, h2, h3, h4, h5, h6 {
     z-index: 1000;
 }
 
-.modal-content {
+.modal .modal-content {
     background-color: var(--bg-input);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
@@ -1884,7 +1884,7 @@ h1, h2, h3, h4, h5, h6 {
     gap: 16px;
 }
 
-.modal-content h4 {
+.modal .modal-content h4 {
     font-size: 15px;
     font-weight: 600;
 }
