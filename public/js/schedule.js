@@ -999,6 +999,7 @@ async function render(container) {
                     <button class="view-tab-btn admin-only" data-tab="tab-hope">事前指定（希望シフト）</button>
                     <button class="view-tab-btn admin-only" data-tab="tab-support">補充勤務</button>
                     <button class="view-tab-btn" data-tab="tab-vehicle">車両配置</button>
+                    <button class="view-tab-btn admin-only" data-tab="tab-shifts">勤務形態設定</button>
                 </div>
 
                 <!-- タブ1: 勤務一覧表 -->
@@ -1152,6 +1153,75 @@ async function render(container) {
                             <h3 style="font-size: 14px; margin-bottom: 12px;">3. 乗車割り当て</h3>
                             <div id="vehicle-cards-grid" class="vehicle-slots-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;">
                                 <!-- 動的に生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- タブ6: 勤務形態（シフト）の設定 -->
+                <section id="tab-shifts" class="tab-content card" style="margin-bottom:0;">
+                    <div class="tab-header">
+                        <h2>勤務形態（シフト）の設定</h2>
+                        <p class="tab-description">独自の勤務形態（シフト・休暇）を追加・編集・削除できます。</p>
+                    </div>
+
+                    <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-top: 16px;">
+                        <!-- 新規追加カード -->
+                        <div class="card-sub" style="flex: 1; min-width: 300px; padding: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); background: var(--bg-card);">
+                            <h3 style="margin-top: 0; margin-bottom: 12px; font-size: 14px; font-weight: 600;">＋ 新規勤務形態の追加</h3>
+                            <div class="form-group" style="margin-bottom: 10px;">
+                                <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">略称コード (1〜3文字)</label>
+                                <input type="text" id="new-shift-key" class="form-control" placeholder="例: 夏" maxlength="3" style="height: 32px; font-size: 12px; width: 100%;">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 10px;">
+                                <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">表示一文字 (1文字)</label>
+                                <input type="text" id="new-shift-char" class="form-control" placeholder="例: 夏" maxlength="1" style="height: 32px; font-size: 12px; width: 100%;">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 10px;">
+                                <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">正式名称 (説明)</label>
+                                <input type="text" id="new-shift-name" class="form-control" placeholder="例: 夏季休暇" style="height: 32px; font-size: 12px; width: 100%;">
+                            </div>
+                            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                <div class="form-group" style="flex: 1;">
+                                    <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">背景色</label>
+                                    <input type="color" id="new-shift-color" value="#3b82f6" style="width: 100%; height: 32px; border: 1px solid var(--border-color); padding: 2px; border-radius: 4px; cursor: pointer;">
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">文字色</label>
+                                    <input type="color" id="new-shift-textcolor" value="#ffffff" style="width: 100%; height: 32px; border: 1px solid var(--border-color); padding: 2px; border-radius: 4px; cursor: pointer;">
+                                </div>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 16px;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; font-weight: 600; user-select: none;">
+                                    <input type="checkbox" id="new-shift-special" style="width: 16px; height: 16px; cursor: pointer; margin: 0;">
+                                    特別休暇として扱う（年休とは別に集計）
+                                </label>
+                            </div>
+                            <button id="btn-add-custom-shift" class="btn btn-primary btn-block" style="font-size: 12px; padding: 8px;">追加する</button>
+                        </div>
+
+                        <!-- 一覧リストカード -->
+                        <div class="card-sub" style="flex: 2; min-width: 400px; padding: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); background: var(--bg-card);">
+                            <h3 style="margin-top: 0; margin-bottom: 12px; font-size: 14px; font-weight: 600;">勤務形態一覧</h3>
+                            <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">※システム定義 of 基本シフト（当・非・週・休）は削除・名前変更できません。</p>
+
+                            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                <table class="roster-grid" style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                                    <thead>
+                                        <tr>
+                                            <th style="padding: 6px; font-size: 11px; text-align: left;">コード</th>
+                                            <th style="padding: 6px; font-size: 11px; text-align: center; width: 60px;">表示</th>
+                                            <th style="padding: 6px; font-size: 11px; text-align: left;">名称</th>
+                                            <th style="padding: 6px; font-size: 11px; width: 60px; text-align: center;">背景色</th>
+                                            <th style="padding: 6px; font-size: 11px; width: 60px; text-align: center;">文字色</th>
+                                            <th style="padding: 6px; font-size: 11px; width: 90px; text-align: center;">特別休暇</th>
+                                            <th style="padding: 6px; font-size: 11px; width: 60px; text-align: center;">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="shift-config-table-body">
+                                        <!-- 動的に生成 -->
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
@@ -1370,10 +1440,25 @@ function updateThemeIcon(theme) {
     }
 }
 
+function saveShiftsToStorage() {
+    localStorage.setItem('fire_dept_shifts', JSON.stringify(state.shifts));
+}
+
 // 設定の初期化
 function initSettings() {
     state.startDate = formatDateLocal(new Date());
     state.station = "指宿消防署";
+    
+    const saved = localStorage.getItem('fire_dept_shifts');
+    if (saved) {
+        try {
+            state.shifts = JSON.parse(saved);
+            return;
+        } catch (e) {
+            console.error('Failed to parse saved shifts:', e);
+        }
+    }
+
     state.shifts = [
         { key: "当", name: "勤務", char: "当", color: "#e0f2fe", textColor: "#0369a1", isSystem: true },
         { key: "明", name: "非番", char: "非", color: "#f3f4f6", textColor: "#4b5563", isSystem: true },
@@ -1382,9 +1467,10 @@ function initSettings() {
         { key: "有", name: "年休", char: "年", color: "#dcfce7", textColor: "#15803d" },
         { key: "公", name: "公休", char: "公", color: "#f3e8ff", textColor: "#6b21a8" },
         { key: "張", name: "出張", char: "張", color: "#e2f0fd", textColor: "#2563eb" },
-        { key: "特", name: "特休", char: "特", color: "#fee2e2", textColor: "#dc2626" },
-        { key: "病", name: "病休", char: "病", color: "#ffedd5", textColor: "#ea580c" }
+        { key: "特", name: "特休", char: "特", color: "#fee2e2", textColor: "#dc2626", isSpecialLeave: true },
+        { key: "病", name: "病休", char: "病", color: "#ffedd5", textColor: "#ea580c", isSpecialLeave: true }
     ];
+    saveShiftsToStorage();
 }
 
 // デフォルトスタッフのロード
@@ -1968,38 +2054,63 @@ function bindEvents() {
     }
 
     // 新規シフト追加
-    const elBtnAddShift = document.getElementById('btn-add-shift');
-    if (elBtnAddShift) {
-        elBtnAddShift.addEventListener('click', async () => {
-            const char = await showCustomPrompt("追加するシフトの記号（1文字）を入力してください：\n（例：公、特、病、など）");
-            if (!char) return;
-            const trimmedChar = char.trim().slice(0, 1);
-            if (trimmedChar.length === 0) return;
+    const elBtnAddCustomShift = document.getElementById('btn-add-custom-shift');
+    if (elBtnAddCustomShift) {
+        elBtnAddCustomShift.addEventListener('click', async () => {
+            const keyInput = document.getElementById('new-shift-key');
+            const charInput = document.getElementById('new-shift-char');
+            const nameInput = document.getElementById('new-shift-name');
+            const colorInput = document.getElementById('new-shift-color');
+            const textColorInput = document.getElementById('new-shift-textcolor');
+            const specialInput = document.getElementById('new-shift-special');
             
-            // 重複チェック
-            if (state.shifts.some(s => s.key === trimmedChar || s.char === trimmedChar)) {
-                await showCustomAlert("既に存在するシフト記号です。別の文字を指定してください。");
+            if (!keyInput || !charInput || !nameInput) return;
+            
+            const key = keyInput.value.trim();
+            const char = charInput.value.trim();
+            const name = nameInput.value.trim();
+            const color = colorInput ? colorInput.value : "#3b82f6";
+            const textColor = textColorInput ? textColorInput.value : "#ffffff";
+            const isSpecialLeave = specialInput ? specialInput.checked : false;
+            
+            if (key.length === 0 || char.length === 0 || name.length === 0) {
+                await showCustomAlert("コード、表示文字、名称をすべて入力してください。");
                 return;
             }
             
-            const name = await showCustomPrompt(`シフト「${trimmedChar}」の正式名称（説明）を入力してください：\n（例：公休、特別休暇、など）`);
-            if (!name) return;
-            const trimmedName = name.trim();
-            
-            // ランダムな配色
-            const randomColor = "#" + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+            // 重複チェック
+            if (state.shifts.some(s => s.key === key || s.char === char)) {
+                await showCustomAlert("既に存在するコードまたは表示文字です。別のものを指定してください。");
+                return;
+            }
             
             state.shifts.push({
-                key: trimmedChar,
-                name: trimmedName,
-                char: trimmedChar,
-                color: randomColor,
-                textColor: "#ffffff"
+                key: key,
+                name: name,
+                char: char,
+                color: color,
+                textColor: textColor,
+                isSpecialLeave: isSpecialLeave
             });
             
-            renderShiftConfigList();
+            saveShiftsToStorage();
+            
+            // 入力の初期化
+            keyInput.value = '';
+            charInput.value = '';
+            nameInput.value = '';
+            if (specialInput) specialInput.checked = false;
+            
+            // 再描画
+            renderShiftConfigTable();
             renderLegend();
             refreshUI();
+            
+            if (typeof Portal !== 'undefined' && Portal.showToast) {
+                Portal.showToast(`勤務形態「${name}」を追加しました。`, 'success');
+            } else {
+                await showCustomAlert(`勤務形態「${name}」を追加しました。`);
+            }
         });
     }
 
@@ -2489,11 +2600,12 @@ function bindEvents() {
                             { key: "有", name: "年休", char: "年", color: "#dcfce7", textColor: "#15803d" },
                             { key: "公", name: "公休", char: "公", color: "#f3e8ff", textColor: "#6b21a8" },
                             { key: "張", name: "出張", char: "張", color: "#e2f0fd", textColor: "#2563eb" },
-                            { key: "特", name: "特休", char: "特", color: "#fee2e2", textColor: "#dc2626" },
-                            { key: "病", name: "病休", char: "病", color: "#ffedd5", textColor: "#ea580c" }
+                            { key: "特", name: "特休", char: "特", color: "#fee2e2", textColor: "#dc2626", isSpecialLeave: true },
+                            { key: "病", name: "病休", char: "病", color: "#ffedd5", textColor: "#ea580c", isSpecialLeave: true }
                         ];
                     }
-                    renderShiftConfigList();
+                    saveShiftsToStorage();
+                    renderShiftConfigTable();
                     renderLegend();
 
                     if (data.platoonSize) {
@@ -2753,6 +2865,8 @@ function refreshUI() {
         renderSupportTable();
     } else if (state.activeTab === 'tab-vehicle') {
         renderVehicleView();
+    } else if (state.activeTab === 'tab-shifts') {
+        renderShiftConfigTable();
     }
 }
 
@@ -2845,6 +2959,12 @@ function createTableHeader(thead, isRosterTable) {
         thAnnual.className = 'stats-header-col';
         thAnnual.rowSpan = 2;
         headerDays.appendChild(thAnnual);
+
+        const thSpecial = document.createElement('th');
+        thSpecial.textContent = '特休';
+        thSpecial.className = 'stats-header-col';
+        thSpecial.rowSpan = 2;
+        headerDays.appendChild(thSpecial);
     }
 }
 
@@ -2906,6 +3026,7 @@ function renderRosterTable() {
             let dutyCount = 0;
             let holidayCount = 0;
             let annualLeaveCount = 0;
+            let specialLeaveCount = 0;
             
             for (let d = 0; d < 28; d++) {
                 const shift = schedule[d];
@@ -2955,6 +3076,10 @@ function renderRosterTable() {
                         annualLeaveCount += staff.isDayWorker ? 1.0 : 2.0;
                     }
                 }
+                const shiftObj = state.shifts.find(s => s.key === shift);
+                if (shiftObj && shiftObj.isSpecialLeave) {
+                    specialLeaveCount += staff.isDayWorker ? 1.0 : 2.0;
+                }
             }
             
             // 当番日数統計
@@ -2977,6 +3102,12 @@ function renderRosterTable() {
             tdAnnualStat.className = 'stats-cell';
             tdAnnualStat.textContent = Number.isInteger(annualLeaveCount) ? annualLeaveCount.toString() : annualLeaveCount.toFixed(2);
             tr.appendChild(tdAnnualStat);
+
+            // 特休日数統計
+            const tdSpecialStat = document.createElement('td');
+            tdSpecialStat.className = 'stats-cell';
+            tdSpecialStat.textContent = Number.isInteger(specialLeaveCount) ? specialLeaveCount.toString() : specialLeaveCount.toFixed(2);
+            tr.appendChild(tdSpecialStat);
             
             tbody.appendChild(tr);
         });
@@ -3018,6 +3149,7 @@ function renderRosterTable() {
         trTotal.appendChild(document.createElement('td'));
         trTotal.appendChild(document.createElement('td'));
         trTotal.appendChild(document.createElement('td'));
+        trTotal.appendChild(document.createElement('td')); // 特休用空セル
         tbody.appendChild(trTotal);
  
         // 階級・資格別集計の設定
@@ -3091,6 +3223,7 @@ function renderRosterTable() {
             trSum.appendChild(document.createElement('td'));
             trSum.appendChild(document.createElement('td'));
             trSum.appendChild(document.createElement('td'));
+            trSum.appendChild(document.createElement('td')); // 特休用空セル
             tbody.appendChild(trSum);
         });
         
@@ -3134,6 +3267,184 @@ function renderLegend() {
 }
 
 // 勤務シフト設定の管理エリアの描画
+// 勤務形態（シフト）設定の管理テーブルの描画
+function renderShiftConfigTable() {
+    const tbody = document.getElementById('shift-config-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    
+    state.shifts.forEach(shift => {
+        const tr = document.createElement('tr');
+        
+        // 1. コード (key) - 読み取り専用
+        const tdKey = document.createElement('td');
+        tdKey.style.padding = '6px';
+        tdKey.style.fontWeight = '600';
+        tdKey.textContent = shift.key;
+        tr.appendChild(tdKey);
+        
+        // 2. 表示一文字 (char)
+        const tdChar = document.createElement('td');
+        tdChar.style.padding = '6px';
+        tdChar.style.textAlign = 'center';
+        const inputChar = document.createElement('input');
+        inputChar.type = 'text';
+        inputChar.value = shift.char;
+        inputChar.maxLength = 1;
+        inputChar.style.width = '36px';
+        inputChar.style.textAlign = 'center';
+        inputChar.className = 'form-control';
+        inputChar.style.height = '28px';
+        inputChar.style.padding = '2px';
+        if (shift.isSystem) {
+            inputChar.disabled = true;
+        } else {
+            inputChar.addEventListener('change', (e) => {
+                shift.char = e.target.value.trim() || shift.key;
+                saveShiftsToStorage();
+                renderLegend();
+                refreshUI();
+            });
+        }
+        tdChar.appendChild(inputChar);
+        tr.appendChild(tdChar);
+        
+        // 3. 正式名称 (name)
+        const tdName = document.createElement('td');
+        tdName.style.padding = '6px';
+        const inputName = document.createElement('input');
+        inputName.type = 'text';
+        inputName.value = shift.name;
+        inputName.className = 'form-control';
+        inputName.style.height = '28px';
+        inputName.style.padding = '4px 8px';
+        inputName.style.width = '100%';
+        if (shift.isSystem) {
+            inputName.disabled = true;
+        } else {
+            inputName.addEventListener('change', (e) => {
+                shift.name = e.target.value.trim() || shift.key;
+                saveShiftsToStorage();
+                renderLegend();
+                refreshUI();
+            });
+        }
+        tdName.appendChild(inputName);
+        tr.appendChild(tdName);
+        
+        // 4. 背景色 (color)
+        const tdColor = document.createElement('td');
+        tdColor.style.padding = '6px';
+        tdColor.style.textAlign = 'center';
+        const inputColor = document.createElement('input');
+        inputColor.type = 'color';
+        inputColor.value = shift.color;
+        inputColor.style.width = '40px';
+        inputColor.style.height = '28px';
+        inputColor.style.padding = '2px';
+        inputColor.style.border = '1px solid var(--border-color)';
+        inputColor.style.borderRadius = '4px';
+        inputColor.style.cursor = 'pointer';
+        inputColor.addEventListener('input', (e) => {
+            shift.color = e.target.value;
+            saveShiftsToStorage();
+            renderLegend();
+            refreshUI();
+        });
+        tdColor.appendChild(inputColor);
+        tr.appendChild(tdColor);
+        
+        // 5. 文字色 (textColor)
+        const tdTextColor = document.createElement('td');
+        tdTextColor.style.padding = '6px';
+        tdTextColor.style.textAlign = 'center';
+        const inputTextColor = document.createElement('input');
+        inputTextColor.type = 'color';
+        inputTextColor.value = shift.textColor;
+        inputTextColor.style.width = '40px';
+        inputTextColor.style.height = '28px';
+        inputTextColor.style.padding = '2px';
+        inputTextColor.style.border = '1px solid var(--border-color)';
+        inputTextColor.style.borderRadius = '4px';
+        inputTextColor.style.cursor = 'pointer';
+        inputTextColor.addEventListener('input', (e) => {
+            shift.textColor = e.target.value;
+            saveShiftsToStorage();
+            renderLegend();
+            refreshUI();
+        });
+        tdTextColor.appendChild(inputTextColor);
+        tr.appendChild(tdTextColor);
+        
+        // 6. 特別休暇 (isSpecialLeave)
+        const tdSpecial = document.createElement('td');
+        tdSpecial.style.padding = '6px';
+        tdSpecial.style.textAlign = 'center';
+        const inputSpecial = document.createElement('input');
+        inputSpecial.type = 'checkbox';
+        inputSpecial.checked = !!shift.isSpecialLeave;
+        inputSpecial.style.width = '16px';
+        inputSpecial.style.height = '16px';
+        inputSpecial.style.cursor = 'pointer';
+        if (shift.isSystem) {
+            inputSpecial.disabled = true;
+        } else {
+            inputSpecial.addEventListener('change', (e) => {
+                shift.isSpecialLeave = e.target.checked;
+                saveShiftsToStorage();
+                refreshUI();
+            });
+        }
+        tdSpecial.appendChild(inputSpecial);
+        tr.appendChild(tdSpecial);
+        
+        // 7. 操作 (削除)
+        const tdAction = document.createElement('td');
+        tdAction.style.padding = '6px';
+        tdAction.style.textAlign = 'center';
+        const btnDelete = document.createElement('button');
+        btnDelete.className = 'btn btn-secondary';
+        btnDelete.style.padding = '2px 8px';
+        btnDelete.style.fontSize = '11px';
+        btnDelete.style.height = 'auto';
+        if (shift.isSystem) {
+            btnDelete.textContent = '固定';
+            btnDelete.disabled = true;
+            btnDelete.style.opacity = '0.5';
+            btnDelete.style.cursor = 'not-allowed';
+        } else {
+            btnDelete.textContent = '削除';
+            btnDelete.style.color = 'var(--color-wday-sun)';
+            btnDelete.style.borderColor = 'rgba(220, 38, 38, 0.2)';
+            btnDelete.style.backgroundColor = 'rgba(220, 38, 38, 0.02)';
+            btnDelete.addEventListener('click', async () => {
+                if (await showCustomConfirm(`シフト「${shift.name}」を削除しますか？\n（勤務表内のこのシフトは「-」に変更されます）`)) {
+                    // 全サイクルの勤務表と希望休から、削除されたシフトをクリア
+                    for (let key in state.roster) {
+                        state.roster[key] = state.roster[key].map(val => val === shift.key ? '-' : val);
+                    }
+                    for (let key in state.hopeShifts) {
+                        for (let day in state.hopeShifts[key]) {
+                            if (state.hopeShifts[key][day] === shift.key) {
+                                delete state.hopeShifts[key][day];
+                            }
+                        }
+                    }
+                    state.shifts = state.shifts.filter(s => s.key !== shift.key);
+                    saveShiftsToStorage();
+                    renderShiftConfigTable();
+                    renderLegend();
+                    refreshUI();
+                }
+            });
+        }
+        tdAction.appendChild(btnDelete);
+        tr.appendChild(tdAction);
+        
+        tbody.appendChild(tr);
+    });
+}
+
 function renderShiftConfigList() {
     const listContainer = document.getElementById('shift-config-list');
     if (!listContainer) return;

@@ -728,10 +728,25 @@ function updateThemeIcon(theme) {
     }
 }
 
+function saveShiftsToStorage() {
+    localStorage.setItem('fire_dept_shifts', JSON.stringify(state.shifts));
+}
+
 // 設定の初期化
 function initSettings() {
     state.startDate = new Date();
     state.station = "指宿消防署";
+    
+    const saved = localStorage.getItem('fire_dept_shifts');
+    if (saved) {
+        try {
+            state.shifts = JSON.parse(saved);
+            return;
+        } catch (e) {
+            console.error('Failed to parse saved shifts:', e);
+        }
+    }
+
     state.shifts = [
         { key: "当", name: "勤務", char: "当", color: "#e0f2fe", textColor: "#0369a1", isSystem: true },
         { key: "明", name: "非番", char: "非", color: "#f3f4f6", textColor: "#4b5563", isSystem: true },
@@ -739,9 +754,10 @@ function initSettings() {
         { key: "有", name: "年休", char: "年", color: "#dcfce7", textColor: "#15803d" },
         { key: "公", name: "公休", char: "公", color: "#f3e8ff", textColor: "#6b21a8" },
         { key: "張", name: "出張", char: "張", color: "#e2f0fd", textColor: "#2563eb" },
-        { key: "特", name: "特休", char: "特", color: "#fee2e2", textColor: "#dc2626" },
-        { key: "病", name: "病休", char: "病", color: "#ffedd5", textColor: "#ea580c" }
+        { key: "特", name: "特休", char: "特", color: "#fee2e2", textColor: "#dc2626", isSpecialLeave: true },
+        { key: "病", name: "病休", char: "病", color: "#ffedd5", textColor: "#ea580c", isSpecialLeave: true }
     ];
+    saveShiftsToStorage();
 }
 
 // デフォルトスタッフのロード
@@ -1292,37 +1308,61 @@ function bindEvents() {
     });
 
     // 新規シフト追加
-    document.getElementById('btn-add-shift').addEventListener('click', async () => {
-        const char = await showCustomPrompt("追加するシフトの記号（1文字）を入力してください：\n（例：公、特、病、など）");
-        if (!char) return;
-        const trimmedChar = char.trim().slice(0, 1);
-        if (trimmedChar.length === 0) return;
-        
-        // 重複チェック
-        if (state.shifts.some(s => s.key === trimmedChar || s.char === trimmedChar)) {
-            await showCustomAlert("既に存在するシフト記号です。別の文字を指定してください。");
-            return;
-        }
-        
-        const name = await showCustomPrompt(`シフト「${trimmedChar}」の正式名称（説明）を入力してください：\n（例：公休、特別休暇、など）`);
-        if (!name) return;
-        const trimmedName = name.trim();
-        
-        // ランダムな配色
-        const randomColor = "#" + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
-        
-        state.shifts.push({
-            key: trimmedChar,
-            name: trimmedName,
-            char: trimmedChar,
-            color: randomColor,
-            textColor: "#ffffff"
+    const elBtnAddCustomShift = document.getElementById('btn-add-custom-shift');
+    if (elBtnAddCustomShift) {
+        elBtnAddCustomShift.addEventListener('click', async () => {
+            const keyInput = document.getElementById('new-shift-key');
+            const charInput = document.getElementById('new-shift-char');
+            const nameInput = document.getElementById('new-shift-name');
+            const colorInput = document.getElementById('new-shift-color');
+            const textColorInput = document.getElementById('new-shift-textcolor');
+            const specialInput = document.getElementById('new-shift-special');
+            
+            if (!keyInput || !charInput || !nameInput) return;
+            
+            const key = keyInput.value.trim();
+            const char = charInput.value.trim();
+            const name = nameInput.value.trim();
+            const color = colorInput ? colorInput.value : "#3b82f6";
+            const textColor = textColorInput ? textColorInput.value : "#ffffff";
+            const isSpecialLeave = specialInput ? specialInput.checked : false;
+            
+            if (key.length === 0 || char.length === 0 || name.length === 0) {
+                await showCustomAlert("コード、表示文字、名称をすべて入力してください。");
+                return;
+            }
+            
+            // 重複チェック
+            if (state.shifts.some(s => s.key === key || s.char === char)) {
+                await showCustomAlert("既に存在するコードまたは表示文字です。別のものを指定してください。");
+                return;
+            }
+            
+            state.shifts.push({
+                key: key,
+                name: name,
+                char: char,
+                color: color,
+                textColor: textColor,
+                isSpecialLeave: isSpecialLeave
+            });
+            
+            saveShiftsToStorage();
+            
+            // 入力の初期化
+            keyInput.value = '';
+            charInput.value = '';
+            nameInput.value = '';
+            if (specialInput) specialInput.checked = false;
+            
+            // 再描画
+            renderShiftConfigTable();
+            renderLegend();
+            refreshUI();
+            
+            await showCustomAlert(`勤務形態「${name}」を追加しました。`);
         });
-        
-        renderShiftConfigList();
-        renderLegend();
-        refreshUI();
-    });
+    }
 
     // テーマ切り替え
     document.getElementById('btn-theme-toggle').addEventListener('click', () => {
@@ -1840,11 +1880,12 @@ function bindEvents() {
                         { key: "有", name: "年休", char: "年", color: "#dcfce7", textColor: "#15803d" },
                         { key: "公", name: "公休", char: "公", color: "#f3e8ff", textColor: "#6b21a8" },
                         { key: "張", name: "出張", char: "張", color: "#e2f0fd", textColor: "#2563eb" },
-                        { key: "特", name: "特休", char: "特", color: "#fee2e2", textColor: "#dc2626" },
-                        { key: "病", name: "病休", char: "病", color: "#ffedd5", textColor: "#ea580c" }
+                        { key: "特", name: "特休", char: "特", color: "#fee2e2", textColor: "#dc2626", isSpecialLeave: true },
+                        { key: "病", name: "病休", char: "病", color: "#ffedd5", textColor: "#ea580c", isSpecialLeave: true }
                     ];
                 }
-                renderShiftConfigList();
+                saveShiftsToStorage();
+                renderShiftConfigTable();
                 renderLegend();
 
                 if (data.platoonSize) {
@@ -2089,6 +2130,8 @@ function refreshUI() {
         renderSupportTable();
     } else if (state.activeTab === 'tab-vehicle') {
         renderVehicleView();
+    } else if (state.activeTab === 'tab-shifts') {
+        renderShiftConfigTable();
     }
 }
 
@@ -2181,6 +2224,12 @@ function createTableHeader(thead, isRosterTable) {
         thAnnual.className = 'stats-header-col';
         thAnnual.rowSpan = 2;
         headerDays.appendChild(thAnnual);
+
+        const thSpecial = document.createElement('th');
+        thSpecial.textContent = '特休';
+        thSpecial.className = 'stats-header-col';
+        thSpecial.rowSpan = 2;
+        headerDays.appendChild(thSpecial);
     }
 }
 
@@ -2243,6 +2292,7 @@ function renderRosterTable() {
             let dutyCount = 0;
             let holidayCount = 0;
             let annualLeaveCount = 0;
+            let specialLeaveCount = 0;
             
             for (let d = 0; d < 28; d++) {
                 const shift = schedule[d];
@@ -2292,6 +2342,10 @@ function renderRosterTable() {
                         annualLeaveCount += staff.isDayWorker ? 1.0 : 2.0;
                     }
                 }
+                const shiftObj = state.shifts.find(s => s.key === shift);
+                if (shiftObj && shiftObj.isSpecialLeave) {
+                    specialLeaveCount += staff.isDayWorker ? 1.0 : 2.0;
+                }
             }
             
             // 当番日数統計
@@ -2314,6 +2368,12 @@ function renderRosterTable() {
             tdAnnualStat.className = 'stats-cell';
             tdAnnualStat.textContent = Number.isInteger(annualLeaveCount) ? annualLeaveCount.toString() : annualLeaveCount.toFixed(2);
             tr.appendChild(tdAnnualStat);
+
+            // 特休日数統計
+            const tdSpecialStat = document.createElement('td');
+            tdSpecialStat.className = 'stats-cell';
+            tdSpecialStat.textContent = Number.isInteger(specialLeaveCount) ? specialLeaveCount.toString() : specialLeaveCount.toFixed(2);
+            tr.appendChild(tdSpecialStat);
             
             tbody.appendChild(tr);
         });
@@ -2355,6 +2415,7 @@ function renderRosterTable() {
         trTotal.appendChild(document.createElement('td'));
         trTotal.appendChild(document.createElement('td'));
         trTotal.appendChild(document.createElement('td'));
+        trTotal.appendChild(document.createElement('td')); // 特休用空セル
         tbody.appendChild(trTotal);
  
         // 階級・資格別集計の設定
@@ -2428,6 +2489,7 @@ function renderRosterTable() {
             trSum.appendChild(document.createElement('td'));
             trSum.appendChild(document.createElement('td'));
             trSum.appendChild(document.createElement('td'));
+            trSum.appendChild(document.createElement('td')); // 特休用空セル
             tbody.appendChild(trSum);
         });
         
@@ -2467,6 +2529,184 @@ function renderLegend() {
         item.appendChild(badge);
         item.appendChild(document.createTextNode(` ${shift.name}`));
         legendContainer.appendChild(item);
+    });
+}
+
+// 勤務形態（シフト）設定の管理テーブルの描画
+function renderShiftConfigTable() {
+    const tbody = document.getElementById('shift-config-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    
+    state.shifts.forEach(shift => {
+        const tr = document.createElement('tr');
+        
+        // 1. コード (key) - 読み取り専用
+        const tdKey = document.createElement('td');
+        tdKey.style.padding = '6px';
+        tdKey.style.fontWeight = '600';
+        tdKey.textContent = shift.key;
+        tr.appendChild(tdKey);
+        
+        // 2. 表示一文字 (char)
+        const tdChar = document.createElement('td');
+        tdChar.style.padding = '6px';
+        tdChar.style.textAlign = 'center';
+        const inputChar = document.createElement('input');
+        inputChar.type = 'text';
+        inputChar.value = shift.char;
+        inputChar.maxLength = 1;
+        inputChar.style.width = '36px';
+        inputChar.style.textAlign = 'center';
+        inputChar.className = 'form-control';
+        inputChar.style.height = '28px';
+        inputChar.style.padding = '2px';
+        if (shift.isSystem) {
+            inputChar.disabled = true;
+        } else {
+            inputChar.addEventListener('change', (e) => {
+                shift.char = e.target.value.trim() || shift.key;
+                saveShiftsToStorage();
+                renderLegend();
+                refreshUI();
+            });
+        }
+        tdChar.appendChild(inputChar);
+        tr.appendChild(tdChar);
+        
+        // 3. 正式名称 (name)
+        const tdName = document.createElement('td');
+        tdName.style.padding = '6px';
+        const inputName = document.createElement('input');
+        inputName.type = 'text';
+        inputName.value = shift.name;
+        inputName.className = 'form-control';
+        inputName.style.height = '28px';
+        inputName.style.padding = '4px 8px';
+        inputName.style.width = '100%';
+        if (shift.isSystem) {
+            inputName.disabled = true;
+        } else {
+            inputName.addEventListener('change', (e) => {
+                shift.name = e.target.value.trim() || shift.key;
+                saveShiftsToStorage();
+                renderLegend();
+                refreshUI();
+            });
+        }
+        tdName.appendChild(inputName);
+        tr.appendChild(tdName);
+        
+        // 4. 背景色 (color)
+        const tdColor = document.createElement('td');
+        tdColor.style.padding = '6px';
+        tdColor.style.textAlign = 'center';
+        const inputColor = document.createElement('input');
+        inputColor.type = 'color';
+        inputColor.value = shift.color;
+        inputColor.style.width = '40px';
+        inputColor.style.height = '28px';
+        inputColor.style.padding = '2px';
+        inputColor.style.border = '1px solid var(--border-color)';
+        inputColor.style.borderRadius = '4px';
+        inputColor.style.cursor = 'pointer';
+        inputColor.addEventListener('input', (e) => {
+            shift.color = e.target.value;
+            saveShiftsToStorage();
+            renderLegend();
+            refreshUI();
+        });
+        tdColor.appendChild(inputColor);
+        tr.appendChild(tdColor);
+        
+        // 5. 文字色 (textColor)
+        const tdTextColor = document.createElement('td');
+        tdTextColor.style.padding = '6px';
+        tdTextColor.style.textAlign = 'center';
+        const inputTextColor = document.createElement('input');
+        inputTextColor.type = 'color';
+        inputTextColor.value = shift.textColor;
+        inputTextColor.style.width = '40px';
+        inputTextColor.style.height = '28px';
+        inputTextColor.style.padding = '2px';
+        inputTextColor.style.border = '1px solid var(--border-color)';
+        inputTextColor.style.borderRadius = '4px';
+        inputTextColor.style.cursor = 'pointer';
+        inputTextColor.addEventListener('input', (e) => {
+            shift.textColor = e.target.value;
+            saveShiftsToStorage();
+            renderLegend();
+            refreshUI();
+        });
+        tdTextColor.appendChild(inputTextColor);
+        tr.appendChild(tdTextColor);
+        
+        // 6. 特別休暇 (isSpecialLeave)
+        const tdSpecial = document.createElement('td');
+        tdSpecial.style.padding = '6px';
+        tdSpecial.style.textAlign = 'center';
+        const inputSpecial = document.createElement('input');
+        inputSpecial.type = 'checkbox';
+        inputSpecial.checked = !!shift.isSpecialLeave;
+        inputSpecial.style.width = '16px';
+        inputSpecial.style.height = '16px';
+        inputSpecial.style.cursor = 'pointer';
+        if (shift.isSystem) {
+            inputSpecial.disabled = true;
+        } else {
+            inputSpecial.addEventListener('change', (e) => {
+                shift.isSpecialLeave = e.target.checked;
+                saveShiftsToStorage();
+                refreshUI();
+            });
+        }
+        tdSpecial.appendChild(inputSpecial);
+        tr.appendChild(tdSpecial);
+        
+        // 7. 操作 (削除)
+        const tdAction = document.createElement('td');
+        tdAction.style.padding = '6px';
+        tdAction.style.textAlign = 'center';
+        const btnDelete = document.createElement('button');
+        btnDelete.className = 'btn btn-secondary';
+        btnDelete.style.padding = '2px 8px';
+        btnDelete.style.fontSize = '11px';
+        btnDelete.style.height = 'auto';
+        if (shift.isSystem) {
+            btnDelete.textContent = '固定';
+            btnDelete.disabled = true;
+            btnDelete.style.opacity = '0.5';
+            btnDelete.style.cursor = 'not-allowed';
+        } else {
+            btnDelete.textContent = '削除';
+            btnDelete.style.color = 'var(--color-wday-sun)';
+            btnDelete.style.borderColor = 'rgba(220, 38, 38, 0.2)';
+            btnDelete.style.backgroundColor = 'rgba(220, 38, 38, 0.02)';
+            btnDelete.addEventListener('click', async () => {
+                if (await showCustomConfirm(`シフト「${shift.name}」を削除しますか？\n（勤務表内のこのシフトは「-」に変更されます）`)) {
+                    // 全サイクルの勤務表と希望休から、削除されたシフトをクリア
+                    for (let key in state.roster) {
+                        state.roster[key] = state.roster[key].map(val => val === shift.key ? '-' : val);
+                    }
+                    for (let key in state.hopeShifts) {
+                        for (let day in state.hopeShifts[key]) {
+                            if (state.hopeShifts[key][day] === shift.key) {
+                                delete state.hopeShifts[key][day];
+                            }
+                        }
+                    }
+                    state.shifts = state.shifts.filter(s => s.key !== shift.key);
+                    saveShiftsToStorage();
+                    renderShiftConfigTable();
+                    renderLegend();
+                    refreshUI();
+                }
+            });
+        }
+        tdAction.appendChild(btnDelete);
+        tr.appendChild(tdAction);
+        
+        tbody.appendChild(tr);
     });
 }
 
