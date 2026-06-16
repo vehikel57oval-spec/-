@@ -199,6 +199,51 @@ function initVehicleConfigModal() {
     }
 }
 
+function initMemberConfigModal() {
+    const modal = document.getElementById('member-config-modal');
+    const btnCloseX = document.getElementById('btn-member-modal-x');
+    const btnClose = document.getElementById('btn-member-modal-close');
+    const tab1 = document.getElementById('modal-btn-platoon-1');
+    const tab2 = document.getElementById('modal-btn-platoon-2');
+    
+    if (!modal) return;
+    
+    const trigger = document.getElementById('btn-open-member-modal');
+    if (trigger) {
+        trigger.addEventListener('click', () => {
+            state.modalActivePlatoon = 1;
+            if (tab1) tab1.classList.add('active');
+            if (tab2) tab2.classList.remove('active');
+            renderModalStaffTable(1);
+            modal.style.display = 'flex';
+        });
+    }
+    
+    if (btnCloseX) {
+        btnCloseX.addEventListener('click', () => { modal.style.display = 'none'; });
+    }
+    if (btnClose) {
+        btnClose.addEventListener('click', () => { modal.style.display = 'none'; });
+    }
+    
+    if (tab1) {
+        tab1.addEventListener('click', () => {
+            state.modalActivePlatoon = 1;
+            tab1.classList.add('active');
+            if (tab2) tab2.classList.remove('active');
+            renderModalStaffTable(1);
+        });
+    }
+    if (tab2) {
+        tab2.addEventListener('click', () => {
+            state.modalActivePlatoon = 2;
+            tab2.classList.add('active');
+            if (tab1) tab1.classList.remove('active');
+            renderModalStaffTable(2);
+        });
+    }
+}
+
 function renderVehicleConfigTable() {
     const tbody = document.getElementById('vehicle-config-table-body');
     if (!tbody) return;
@@ -921,45 +966,11 @@ async function render(container) {
                 </section>
 
                 <section class="card settings-card admin-only" style="padding: 16px; display:flex; flex-direction:column; gap:12px; margin-bottom:0;">
-                    <h2 style="font-size:14px; border-bottom:1px solid var(--border-color); padding-bottom:6px; margin-bottom:0;">2. メンバー定員管理</h2>
-                    <div class="platoon-selector" style="display:flex; gap:6px;">
-                        <button id="btn-platoon-1" class="platoon-tab-btn btn-platoon active" data-platoon="1" style="flex:1; font-size:12px; padding:4px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-app); cursor:pointer;">A日 (1部)</button>
-                        <button id="btn-platoon-2" class="platoon-tab-btn btn-platoon" data-platoon="2" style="flex:1; font-size:12px; padding:4px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-app); cursor:pointer;">B日 (2部)</button>
-                    </div>
-                    <div id="platoon-1-container" class="platoon-members-table-container" style="overflow-x:auto; max-height:240px; overflow-y:auto;">
-                        <table style="width:100%; border-collapse:collapse; font-size:11px; min-width:400px; text-align:left;">
-                            <thead>
-                                <tr style="border-bottom:1px solid var(--border-color); color:var(--text-secondary);">
-                                    <th style="padding:4px 2px;">氏名</th>
-                                    <th style="padding:4px 2px;">階級</th>
-                                    <th style="padding:4px 2px; width:75px;">隊</th>
-                                    <th style="padding:4px 2px; text-align:center; width:36px;">大型</th>
-                                    <th style="padding:4px 2px; text-align:center; width:36px;">救命士</th>
-                                    <th style="padding:4px 2px; text-align:center; width:36px;">機関員</th>
-                                    <th style="padding:4px 2px; text-align:center; width:36px;">日勤</th>
-                                </tr>
-                            </thead>
-                            <tbody id="platoon-1-members">
-                            </tbody>
-                        </table>
-                    </div>
-                    <div id="platoon-2-container" class="platoon-members-table-container" style="display: none; overflow-x:auto; max-height:240px; overflow-y:auto;">
-                        <table style="width:100%; border-collapse:collapse; font-size:11px; min-width:400px; text-align:left;">
-                            <thead>
-                                <tr style="border-bottom:1px solid var(--border-color); color:var(--text-secondary);">
-                                    <th style="padding:4px 2px;">氏名</th>
-                                    <th style="padding:4px 2px;">階級</th>
-                                    <th style="padding:4px 2px; width:75px;">隊</th>
-                                    <th style="padding:4px 2px; text-align:center; width:36px;">大型</th>
-                                    <th style="padding:4px 2px; text-align:center; width:36px;">救命士</th>
-                                    <th style="padding:4px 2px; text-align:center; width:36px;">機関員</th>
-                                    <th style="padding:4px 2px; text-align:center; width:36px;">日勤</th>
-                                </tr>
-                            </thead>
-                            <tbody id="platoon-2-members">
-                            </tbody>
-                        </table>
-                    </div>
+                    <h2 style="font-size:14px; border-bottom:1px solid var(--border-color); padding-bottom:6px; margin-bottom:0;">2. メンバー管理</h2>
+                    <p style="font-size: 11px; color: var(--text-secondary); line-height: 1.4; margin-bottom: 0;">小隊メンバーの資格・階級設定は、専用ダイアログから行います。</p>
+                    <button id="btn-open-member-modal" class="btn btn-secondary btn-block" style="font-size: 12px; padding: 8px; font-weight: 600; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 6px;">
+                        <span>👥 メンバー設定を開く</span>
+                    </button>
                 </section>
 
                 <div class="action-buttons" style="display:flex; flex-direction:column; gap:10px;">
@@ -1254,11 +1265,55 @@ async function render(container) {
     `;
     document.body.appendChild(vehicleModalDiv.firstElementChild);
 
+    // 小隊メンバー資格・階級設定用モーダルの動的追加
+    document.getElementById('member-config-modal')?.remove();
+    const memberModalDiv = document.createElement('div');
+    memberModalDiv.innerHTML = `
+        <div id="member-config-modal" class="modal no-print" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 9999;">
+            <div class="modal-content" style="background: var(--bg-card); padding: 24px; border-radius: var(--radius-lg); border: 1px solid var(--border-color); max-width: 760px; width: 95%; max-height: 85%; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; box-shadow: var(--shadow-lg);">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                    <h4 style="margin: 0; font-size: 16px; font-weight: 600;">小隊メンバー資格・階級設定</h4>
+                    <button id="btn-member-modal-x" style="background: transparent; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); line-height: 1;">&times;</button>
+                </div>
+                
+                <div class="modal-platoon-tabs" style="display: flex; gap: 8px; background-color: var(--secondary-bg); padding: 4px; border-radius: var(--radius-sm);">
+                    <button id="modal-btn-platoon-1" class="platoon-tab-btn active" style="flex: 1; border: none; background: transparent; padding: 6px 12px; font-size: 12px; font-weight: 500; cursor: pointer; border-radius: 4px;">A日 (第1小隊)</button>
+                    <button id="modal-btn-platoon-2" class="platoon-tab-btn" style="flex: 1; border: none; background: transparent; padding: 6px 12px; font-size: 12px; font-weight: 500; cursor: pointer; border-radius: 4px;">B日 (第2小隊)</button>
+                </div>
+                
+                <div style="overflow-y: auto; flex: 1; min-height: 250px;">
+                    <table class="roster-grid" style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                        <thead>
+                            <tr>
+                                <th style="text-align: left; padding: 4px 6px; width: 110px;">氏名</th>
+                                <th style="width: 110px; padding: 4px 6px;">階級</th>
+                                <th style="width: 110px; padding: 4px 6px;">隊</th>
+                                <th style="width: 70px; padding: 4px 6px; text-align: center;">大型</th>
+                                <th style="width: 70px; padding: 4px 6px; text-align: center;">救命士</th>
+                                <th style="width: 70px; padding: 4px 6px; text-align: center;">機関員</th>
+                                <th style="width: 70px; padding: 4px 6px; text-align: center;">日勤</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modal-member-table-body">
+                            <!-- JavaScriptで動的生成 -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 8px;">
+                    <button id="btn-member-modal-close" class="btn btn-primary" style="padding: 8px 20px; font-size: 13px;">閉じる</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(memberModalDiv.firstElementChild);
+
     // 設定初期化
     initSettings();
     loadVehicleSpecs();
     renderVehicleCheckboxes();
     initVehicleConfigModal();
+    initMemberConfigModal();
     
     // Authからユーザー情報を反映
     state.station = Auth.user.station_name;
@@ -1648,27 +1703,27 @@ function getPositionOptions(rank) {
     }
 }
 
-// スタッフ名・階級・資格入力欄の動的生成
-function renderStaffInputs() {
-    const p1Container = document.getElementById('platoon-1-members');
-    const p2Container = document.getElementById('platoon-2-members');
-    
-    p1Container.innerHTML = '';
-    p2Container.innerHTML = '';
-    
-    state.staffList.filter(s => !s.isSupport).forEach(staff => {
+// モーダル用メンバー資格・階級テーブルの動的生成
+function renderModalStaffTable(platoonNum) {
+    const tbody = document.getElementById('modal-member-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const filteredStaff = state.staffList.filter(s => !s.isSupport && s.platoon === platoonNum);
+
+    filteredStaff.forEach(staff => {
         const tr = document.createElement('tr');
         tr.style.borderBottom = '1px solid var(--border-color)';
         
-        // 1. 名前入力 (職員管理から一元設定されるため読取専用)
+        // 1. 名前入力セル (職員管理から設定されるため読取専用)
         const tdName = document.createElement('td');
-        tdName.style.padding = '4px 2px';
+        tdName.style.padding = '6px 8px';
         const inputName = document.createElement('input');
         inputName.type = 'text';
         inputName.className = 'form-control';
-        inputName.style.fontSize = '11px';
-        inputName.style.padding = '2px 4px';
-        inputName.style.height = '24px';
+        inputName.style.height = '28px';
+        inputName.style.fontSize = '12px';
+        inputName.style.padding = '2px 6px';
         inputName.style.width = '100%';
         inputName.value = staff.name;
         inputName.disabled = true;
@@ -1676,105 +1731,118 @@ function renderStaffInputs() {
         inputName.style.cursor = 'default';
         tdName.appendChild(inputName);
         tr.appendChild(tdName);
-        
-        // 2. 階級選択
+
+        // 2. 階級選択セル
         const tdRank = document.createElement('td');
-        tdRank.style.padding = '4px 2px';
+        tdRank.style.padding = '6px 8px';
         const selectRank = document.createElement('select');
         selectRank.className = 'form-control select-rank';
-        selectRank.style.fontSize = '11px';
-        selectRank.style.padding = '2px';
-        selectRank.style.height = '24px';
+        selectRank.style.height = '28px';
+        selectRank.style.fontSize = '12px';
+        selectRank.style.padding = '2px 6px';
         selectRank.style.width = '100%';
         const ranks = ["消防司令", "消防司令補", "消防士長", "消防副士長", "消防士"];
         ranks.forEach(r => {
             const opt = document.createElement('option');
             opt.value = r;
-            opt.textContent = r.replace('消防', '');
+            opt.textContent = r;
             if (staff.rank === r) opt.selected = true;
             selectRank.appendChild(opt);
         });
         tdRank.appendChild(selectRank);
         tr.appendChild(tdRank);
+
+        // 3. 役職・隊選択セル
+        const tdPosition = document.createElement('td');
+        tdPosition.style.padding = '6px 8px';
+        const selectPosition = document.createElement('select');
+        selectPosition.className = 'form-control select-position';
+        selectPosition.style.height = '28px';
+        selectPosition.style.fontSize = '12px';
+        selectPosition.style.padding = '2px 6px';
+        selectPosition.style.width = '100%';
         
-        // 3. 隊 (役職/所属隊) 選択
-        const tdPos = document.createElement('td');
-        tdPos.style.padding = '4px 2px';
-        const selectPos = document.createElement('select');
-        selectPos.className = 'form-control';
-        selectPos.style.fontSize = '11px';
-        selectPos.style.padding = '2px';
-        selectPos.style.height = '24px';
-        selectPos.style.width = '100%';
-        
-        const updatePosOptions = (selectedRank) => {
-            selectPos.innerHTML = '';
+        const updatePositionOptions = (selectedRank) => {
+            selectPosition.innerHTML = '';
             const opts = getPositionOptions(selectedRank);
             opts.forEach(p => {
                 const opt = document.createElement('option');
                 opt.value = p;
                 opt.textContent = p === "" ? "未選択" : p;
                 if (staff.position === p) opt.selected = true;
-                selectPos.appendChild(opt);
+                selectPosition.appendChild(opt);
             });
             if (!opts.includes(staff.position)) {
                 staff.position = opts[0];
-                selectPos.value = opts[0];
+                selectPosition.value = opts[0];
             }
         };
-        updatePosOptions(staff.rank);
-        
+
+        updatePositionOptions(staff.rank);
+
         selectRank.addEventListener('change', (e) => {
             staff.rank = e.target.value;
-            updatePosOptions(staff.rank);
+            updatePositionOptions(staff.rank);
             staff.isRescue = ["救助隊", "救助副", "救助隊長", "小隊長", "主幹"].includes(staff.position);
             refreshUI();
         });
-        
-        selectPos.addEventListener('change', (e) => {
+
+        selectPosition.addEventListener('change', (e) => {
             staff.position = e.target.value;
             staff.isRescue = ["救助隊", "救助副", "救助隊長", "小隊長", "主幹"].includes(staff.position);
             refreshUI();
         });
-        tdPos.appendChild(selectPos);
-        tr.appendChild(tdPos);
-        
-        // Helper for checkboxes
-        const createToggleCell = (isActive, title, toggleProp) => {
+
+        tdPosition.appendChild(selectPosition);
+        tr.appendChild(tdPosition);
+
+        // トグルボタン作成ヘルパー
+        const createToggleBtnCell = (isActive, activeClass, text, title, toggleProp) => {
             const td = document.createElement('td');
-            td.style.padding = '4px 2px';
+            td.style.padding = '6px 8px';
             td.style.textAlign = 'center';
-            const chk = document.createElement('input');
-            chk.type = 'checkbox';
-            chk.checked = isActive;
-            chk.title = title;
-            chk.style.cursor = 'pointer';
-            chk.addEventListener('change', (e) => {
-                staff[toggleProp] = e.target.checked;
+            const btn = document.createElement('span');
+            const baseClass = activeClass.replace('active-', 'qual-');
+            btn.className = `qual-btn ${baseClass} ${isActive ? activeClass : ''}`;
+            btn.textContent = text;
+            btn.title = title;
+            btn.style.width = '28px';
+            btn.style.height = '28px';
+            btn.style.fontSize = '11px';
+            btn.style.display = 'inline-flex';
+            btn.style.alignItems = 'center';
+            btn.style.justifyContent = 'center';
+            btn.style.borderRadius = '4px';
+            btn.style.cursor = 'pointer';
+            btn.addEventListener('click', () => {
+                staff[toggleProp] = !staff[toggleProp];
+                btn.className = `qual-btn ${baseClass} ${staff[toggleProp] ? activeClass : ''}`;
                 refreshUI();
             });
-            td.appendChild(chk);
+            td.appendChild(btn);
             return td;
         };
-        
-        // 4. 大型
-        tr.appendChild(createToggleCell(staff.hasLargeLicense, '大型免許', 'hasLargeLicense'));
-        
-        // 5. 救命士
-        tr.appendChild(createToggleCell(staff.isParamedic, '救急救命士', 'isParamedic'));
-        
-        // 6. 機関員
-        tr.appendChild(createToggleCell(staff.isKikan, '機関員', 'isKikan'));
-        
-        // 7. 日勤者
-        tr.appendChild(createToggleCell(staff.isDayWorker, '日勤者', 'isDayWorker'));
-        
-        if (staff.platoon === 1) {
-            p1Container.appendChild(tr);
-        } else {
-            p2Container.appendChild(tr);
-        }
+
+        // 4. 大型免許 (hasLargeLicense)
+        tr.appendChild(createToggleBtnCell(staff.hasLargeLicense, 'active-large', '大', '大型免許', 'hasLargeLicense'));
+
+        // 5. 救命士 (isParamedic)
+        tr.appendChild(createToggleBtnCell(staff.isParamedic, 'active-paramedic', '救', '救急救命士', 'isParamedic'));
+
+        // 6. 機関員 (isKikan)
+        tr.appendChild(createToggleBtnCell(staff.isKikan, 'active-kikan', '機', '機関員', 'isKikan'));
+
+        // 7. 日勤者 (isDayWorker)
+        tr.appendChild(createToggleBtnCell(staff.isDayWorker, 'active-dayworker', '日', '日勤者', 'isDayWorker'));
+
+        tbody.appendChild(tr);
     });
+}
+
+// スタッフ名・階級・資格入力欄の動的生成
+function renderStaffInputs() {
+    state.modalActivePlatoon = state.modalActivePlatoon || 1;
+    renderModalStaffTable(state.modalActivePlatoon);
 }
 
 // 日付変更時の処理
@@ -2012,24 +2080,7 @@ function bindEvents() {
         regenSelectElement.addEventListener('change', updateGenerateButtonText);
     }
     
-    // 小隊タブ切り替え (サイドバー内)
-    document.querySelectorAll('.platoon-tab-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            document.querySelectorAll('.platoon-tab-btn').forEach(b => b.classList.remove('active'));
-            e.target.classList.add('active');
-            
-            const platoon = parseInt(e.target.dataset.platoon);
-            state.activePlatoon = platoon;
-            
-            if (platoon === 1) {
-                document.getElementById('platoon-1-container').style.display = 'block';
-                document.getElementById('platoon-2-container').style.display = 'none';
-            } else {
-                document.getElementById('platoon-1-container').style.display = 'none';
-                document.getElementById('platoon-2-container').style.display = 'block';
-            }
-        });
-    });
+
     
     // 表示切替タブ (メインエリア)
     document.querySelectorAll('.view-tab-btn').forEach(btn => {
