@@ -3240,6 +3240,28 @@ function showShiftModal(staffId, staffName, dayIndex, isPreScheduling = false) {
     // デフォルトは当日 (dayIndex + 1)
     endSelect.value = dayIndex + 1;
     
+    // サイクル全期間のトグル動作
+    const checkAllCycle = document.getElementById('modal-all-cycle-check');
+    let newCheckAllCycle = null;
+    if (checkAllCycle) {
+        newCheckAllCycle = checkAllCycle.cloneNode(true);
+        checkAllCycle.parentNode.replaceChild(newCheckAllCycle, checkAllCycle);
+        newCheckAllCycle.checked = false;
+        const startLabel = document.getElementById('modal-start-day-label');
+        if (endSelect) endSelect.disabled = false;
+        if (startLabel) startLabel.style.opacity = '1';
+        
+        newCheckAllCycle.addEventListener('change', () => {
+            if (newCheckAllCycle.checked) {
+                if (endSelect) endSelect.disabled = true;
+                if (startLabel) startLabel.style.opacity = '0.5';
+            } else {
+                if (endSelect) endSelect.disabled = false;
+                if (startLabel) startLabel.style.opacity = '1';
+            }
+        });
+    }
+    
     const modal = document.getElementById('shift-modal');
     modal.style.display = 'flex';
     
@@ -3252,6 +3274,9 @@ function showShiftModal(staffId, staffName, dayIndex, isPreScheduling = false) {
     
     // 期間計算ヘルパー関数
     function getTargetRange() {
+        if (newCheckAllCycle && newCheckAllCycle.checked) {
+            return { startDay: 0, endDay: 27 };
+        }
         const startDay = dayIndex;
         let endDay = parseInt(document.getElementById('modal-end-day-select').value) - 1;
         if (isNaN(endDay) || endDay < startDay) {

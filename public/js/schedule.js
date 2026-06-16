@@ -1239,14 +1239,17 @@ async function render(container) {
     const modalDiv = document.createElement('div');
     modalDiv.innerHTML = `
         <div id="shift-modal" class="modal no-print" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 10000;">
-            <div class="modal-content" style="background: var(--bg-card); padding: 24px; border-radius: var(--radius-lg); border: 1px solid var(--border-color); max-width: 380px; width: 100%; text-align: center; box-shadow: var(--shadow-lg);">
+            <div class="modal-content" style="background: var(--bg-card); padding: 24px; border-radius: var(--radius-lg); border: 1px solid var(--border-color); max-width: 440px; width: 100%; text-align: center; box-shadow: var(--shadow-lg);">
                 <h4 id="modal-title" style="margin-top: 0; margin-bottom: 16px; font-size: 16px; font-weight: 600;">シフト変更</h4>
                 
-                <div class="modal-range-selector" style="display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 12px;">
+                <div class="modal-range-selector" style="display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 12px; flex-wrap: wrap;">
                     <span>適用期間:</span>
                     <span id="modal-start-day-label" style="font-weight: 600;">-</span>
                     <span>〜</span>
                     <select id="modal-end-day-select" class="form-input" style="width: auto; padding: 2px 4px; height: 26px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color);"></select>
+                    <label style="display: flex; align-items: center; gap: 4px; font-weight: 500; cursor: pointer; margin-left: 8px; user-select: none;">
+                        <input type="checkbox" id="modal-all-cycle-check"> サイクル全期間
+                    </label>
                 </div>
 
                 <div id="modal-shift-buttons" class="modal-buttons" style="margin-bottom: 12px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
@@ -4012,6 +4015,28 @@ function showShiftModal(staffId, staffName, dayIndex, isPreScheduling = false) {
     // デフォルトは当日 (dayIndex + 1)
     endSelect.value = dayIndex + 1;
     
+    // サイクル全期間のトグル動作
+    const checkAllCycle = document.getElementById('modal-all-cycle-check');
+    let newCheckAllCycle = null;
+    if (checkAllCycle) {
+        newCheckAllCycle = checkAllCycle.cloneNode(true);
+        checkAllCycle.parentNode.replaceChild(newCheckAllCycle, checkAllCycle);
+        newCheckAllCycle.checked = false;
+        const startLabel = document.getElementById('modal-start-day-label');
+        if (endSelect) endSelect.disabled = false;
+        if (startLabel) startLabel.style.opacity = '1';
+        
+        newCheckAllCycle.addEventListener('change', () => {
+            if (newCheckAllCycle.checked) {
+                if (endSelect) endSelect.disabled = true;
+                if (startLabel) startLabel.style.opacity = '0.5';
+            } else {
+                if (endSelect) endSelect.disabled = false;
+                if (startLabel) startLabel.style.opacity = '1';
+            }
+        });
+    }
+    
     const modal = document.getElementById('shift-modal');
     modal.style.display = 'flex';
     
@@ -4024,6 +4049,9 @@ function showShiftModal(staffId, staffName, dayIndex, isPreScheduling = false) {
     
     // 期間計算ヘルパー関数
     function getTargetRange() {
+        if (newCheckAllCycle && newCheckAllCycle.checked) {
+            return { startDay: 0, endDay: 27 };
+        }
         const startDay = dayIndex;
         let endDay = parseInt(document.getElementById('modal-end-day-select').value) - 1;
         if (isNaN(endDay) || endDay < startDay) {
