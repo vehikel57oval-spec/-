@@ -744,6 +744,7 @@ const Dashboard = {
                 "当": { bg: "rgba(224, 242, 254, 0.5)", border: "#0284c7", color: "#0369a1", name: "当務" },
                 "明": { bg: "rgba(243, 244, 246, 0.5)", border: "#d1d5db", color: "#4b5563", name: "非番" },
                 "非": { bg: "rgba(243, 244, 246, 0.5)", border: "#d1d5db", color: "#4b5563", name: "非番" },
+                "日": { bg: "rgba(204, 251, 241, 0.5)", border: "#14b8a6", color: "#0f766e", name: "日勤" },
                 "週": { bg: "rgba(254, 243, 199, 0.5)", border: "#f59e0b", color: "#d97706", name: "週休" },
                 "休": { bg: "rgba(254, 243, 199, 0.5)", border: "#f59e0b", color: "#d97706", name: "休日" },
                 "有": { bg: "rgba(220, 252, 231, 0.5)", border: "#22c55e", color: "#15803d", name: "年休" },

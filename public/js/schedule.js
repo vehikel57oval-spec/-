@@ -1171,11 +1171,11 @@ async function render(container) {
                             <h3 style="margin-top: 0; margin-bottom: 12px; font-size: 14px; font-weight: 600;">＋ 新規勤務形態の追加</h3>
                             <div class="form-group" style="margin-bottom: 10px;">
                                 <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">略称コード (1〜3文字)</label>
-                                <input type="text" id="new-shift-key" class="form-control" placeholder="例: 夏" maxlength="3" style="height: 32px; font-size: 12px; width: 100%;">
+                                <input type="text" id="new-shift-key" class="form-control" placeholder="例: 夏" style="height: 32px; font-size: 12px; width: 100%;">
                             </div>
                             <div class="form-group" style="margin-bottom: 10px;">
                                 <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">表示一文字 (1文字)</label>
-                                <input type="text" id="new-shift-char" class="form-control" placeholder="例: 夏" maxlength="1" style="height: 32px; font-size: 12px; width: 100%;">
+                                <input type="text" id="new-shift-char" class="form-control" placeholder="例: 夏" style="height: 32px; font-size: 12px; width: 100%;">
                             </div>
                             <div class="form-group" style="margin-bottom: 10px;">
                                 <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px;">正式名称 (説明)</label>
@@ -1453,6 +1453,17 @@ function initSettings() {
     if (saved) {
         try {
             state.shifts = JSON.parse(saved);
+            // Migration: Add "日" (日勤) if missing
+            if (!state.shifts.some(s => s.key === "日")) {
+                const idx = state.shifts.findIndex(s => s.key === "明");
+                const newShift = { key: "日", name: "日勤", char: "日", color: "#ccfbf1", textColor: "#0f766e", isSystem: true };
+                if (idx !== -1) {
+                    state.shifts.splice(idx + 1, 0, newShift);
+                } else {
+                    state.shifts.push(newShift);
+                }
+                saveShiftsToStorage();
+            }
             return;
         } catch (e) {
             console.error('Failed to parse saved shifts:', e);
@@ -1462,6 +1473,7 @@ function initSettings() {
     state.shifts = [
         { key: "当", name: "勤務", char: "当", color: "#e0f2fe", textColor: "#0369a1", isSystem: true },
         { key: "明", name: "非番", char: "非", color: "#f3f4f6", textColor: "#4b5563", isSystem: true },
+        { key: "日", name: "日勤", char: "日", color: "#ccfbf1", textColor: "#0f766e", isSystem: true },
         { key: "週", name: "週休", char: "週", color: "#fef3c7", textColor: "#d97706", isSystem: true },
         { key: "休", name: "休日", char: "休", color: "#fee2e2", textColor: "#dc2626", isSystem: true },
         { key: "有", name: "年休", char: "年", color: "#dcfce7", textColor: "#15803d" },
@@ -2077,6 +2089,14 @@ function bindEvents() {
                 await showCustomAlert("コード、表示文字、名称をすべて入力してください。");
                 return;
             }
+            if (char.length !== 1) {
+                await showCustomAlert("表示文字は1文字で指定してください。");
+                return;
+            }
+            if (key.length > 3) {
+                await showCustomAlert("略称コードは3文字以内で指定してください。");
+                return;
+            }
             
             // 重複チェック
             if (state.shifts.some(s => s.key === key || s.char === char)) {
@@ -2595,6 +2615,7 @@ function bindEvents() {
                         state.shifts = [
                             { key: "当", name: "勤務", char: "当", color: "#e0f2fe", textColor: "#0369a1", isSystem: true },
                             { key: "明", name: "非番", char: "非", color: "#f3f4f6", textColor: "#4b5563", isSystem: true },
+                            { key: "日", name: "日勤", char: "日", color: "#ccfbf1", textColor: "#0f766e", isSystem: true },
                             { key: "週", name: "週休", char: "週", color: "#fef3c7", textColor: "#d97706", isSystem: true },
                             { key: "休", name: "休日", char: "休", color: "#fee2e2", textColor: "#dc2626", isSystem: true },
                             { key: "有", name: "年休", char: "年", color: "#dcfce7", textColor: "#15803d" },
