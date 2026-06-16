@@ -1617,24 +1617,24 @@ function generateEmptyRoster() {
 }
 
 // 余剰人員日への年休（有）自動割当ロジック
-function adjustSurplusLeaves(cycleNum) {
-    console.log(`=== adjustSurplusLeaves START (cycle: ${cycleNum}) ===`);
+function adjustSurplusLeaves(cycleNum, platoonNum) {
+    console.log(`=== adjustSurplusLeaves START (cycle: ${cycleNum}, platoon: ${platoonNum}) ===`);
     const minStaff = state.minStaffing;
     const minSub = state.minSubOfficer;
     const minLarge = state.minLarge;
     const minPara = state.minParamedic;
     console.log(`Settings - minStaff: ${minStaff}, minSub: ${minSub}, minLarge: ${minLarge}, minPara: ${minPara}`);
     
-    // 対象の正規職員リスト（応援職員を除き、現在アクティブな小隊の職員で、かつこのサイクルで当番日「当」が1日以上ある職員のみ）
+    // 対象の正規職員リスト（応援職員を除き、指定小隊の職員で、かつこのサイクルで当番日「当」が1日以上ある職員のみ）
     const targetStaff = state.staffList.filter(staff => {
         if (staff.isSupport) return false;
-        if (staff.platoon !== state.activePlatoon) return false;
+        if (staff.platoon !== platoonNum) return false;
         const key = `${cycleNum}_${staff.id}`;
         const schedule = state.roster[key] || [];
         return schedule.includes('当');
     });
     if (targetStaff.length === 0) {
-        console.log("No active staff for surplus leaves adjustment.");
+        console.log(`No active staff for surplus leaves adjustment in platoon ${platoonNum}.`);
         return;
     }
 
@@ -2469,7 +2469,8 @@ function bindEvents() {
                     // 余剰人員への休暇自動割り当てが有効な場合
                     const chkAutoLeave = document.getElementById('chk-auto-leave');
                     if (chkAutoLeave && chkAutoLeave.checked) {
-                        adjustSurplusLeaves(state.activeCycle);
+                        adjustSurplusLeaves(state.activeCycle, 1);
+                        adjustSurplusLeaves(state.activeCycle, 2);
                     }
                     
                     let msg = res.profileMessage;

@@ -901,8 +901,8 @@ function generateEmptyRoster() {
 }
 
 // 余剰人員日への年休（有）自動割当ロジック
-function adjustSurplusLeaves(cycleNum) {
-    console.log(`=== adjustSurplusLeaves START (cycle: ${cycleNum}) ===`);
+function adjustSurplusLeaves(cycleNum, platoonNum) {
+    console.log(`=== adjustSurplusLeaves START (cycle: ${cycleNum}, platoon: ${platoonNum}) ===`);
     const minStaff = state.minStaffing;
     const minSub = state.minSubOfficer;
     const minLarge = state.minLarge;
@@ -914,6 +914,7 @@ function adjustSurplusLeaves(cycleNum) {
         // 出勤している職員のリストを作成
         let onDutyStaff = [];
         state.staffList.forEach(staff => {
+            if (staff.platoon !== platoonNum) return; // 指定小隊以外の職員は除外
             const key = `${cycleNum}_${staff.id}`;
             const shift = (state.roster[key] && state.roster[key][d]) || '-';
             if (shift === '当') {
@@ -1765,7 +1766,8 @@ function bindEvents() {
                     // 余剰人員への休暇自動割り当てが有効な場合
                     const chkAutoLeave = document.getElementById('chk-auto-leave');
                     if (chkAutoLeave && chkAutoLeave.checked) {
-                        adjustSurplusLeaves(state.activeCycle);
+                        adjustSurplusLeaves(state.activeCycle, 1);
+                        adjustSurplusLeaves(state.activeCycle, 2);
                     }
                     
                     let msg = res.profileMessage;
