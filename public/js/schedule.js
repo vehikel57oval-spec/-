@@ -2893,7 +2893,6 @@ function renderRosterTable() {
                         <span class="staff-rank-badge">${getRankAbbr(staff.rank)}</span>
                         ${staff.hasLargeLicense ? '<span class="qual-badge qual-badge-large" title="大型免許">大</span>' : ''}
                         ${staff.isParamedic ? '<span class="qual-badge qual-badge-paramedic" title="救急救命士">救</span>' : ''}
-                        ${staff.isRescue ? '<span class="qual-badge qual-badge-rescue" title="救助隊員">R</span>' : ''}
                         ${staff.isKikan ? '<span class="qual-badge qual-badge-kikan" title="機関員指定">機</span>' : ''}
                         ${staff.isDayWorker ? '<span class="qual-badge qual-badge-dayworker" title="日勤者">日</span>' : ''}
                     </div>
@@ -3290,7 +3289,6 @@ function renderHopeTable() {
                         <span class="staff-rank-badge">${getRankAbbr(staff.rank)}</span>
                         ${staff.hasLargeLicense ? '<span class="qual-badge qual-badge-large" title="大型免許">大</span>' : ''}
                         ${staff.isParamedic ? '<span class="qual-badge qual-badge-paramedic" title="救急救命士">救</span>' : ''}
-                        ${staff.isRescue ? '<span class="qual-badge qual-badge-rescue" title="救助隊員">R</span>' : ''}
                         ${staff.isKikan ? '<span class="qual-badge qual-badge-kikan" title="機関員指定">機</span>' : ''}
                         ${staff.isDayWorker ? '<span class="qual-badge qual-badge-dayworker" title="日勤者">日</span>' : ''}
                     </div>
@@ -3515,13 +3513,6 @@ function renderCalendarView() {
                     qBadge.className = 'qual-badge qual-badge-paramedic';
                     qBadge.textContent = '救';
                     qBadge.title = '救急救命士';
-                    qualsDiv.appendChild(qBadge);
-                }
-                if (staff.isRescue) {
-                    const qBadge = document.createElement('span');
-                    qBadge.className = 'qual-badge qual-badge-rescue';
-                    qBadge.textContent = 'R';
-                    qBadge.title = '救助隊員';
                     qualsDiv.appendChild(qBadge);
                 }
                 if (staff.isKikan) {
@@ -4322,12 +4313,29 @@ function renderVehicleView() {
                 nameArea.style.alignItems = 'center';
                 nameArea.style.gap = '8px';
                 
-                if (staff.position) {
-                    const posBadge = document.createElement('span');
-                    posBadge.className = `staff-position-badge ${getPositionClass(staff.position)}`;
-                    posBadge.textContent = getPositionAbbr(staff.position);
-                    nameArea.appendChild(posBadge);
+                // 隊名の丸アイコン (消防隊: 赤丸, 救急隊: 青丸, 救助隊: オレンジ丸, 選択なし: 灰色丸)
+                const teamCircle = document.createElement('span');
+                teamCircle.className = 'staff-team-circle-marker';
+                teamCircle.style.width = '10px';
+                teamCircle.style.height = '10px';
+                teamCircle.style.borderRadius = '50%';
+                teamCircle.style.display = 'inline-block';
+                teamCircle.style.flexShrink = '0';
+                
+                let circleColor = '#9ca3af'; // 選択なし/その他 (灰色)
+                const pos = staff.position;
+                if (pos) {
+                    if (["小隊長", "消防隊長", "消防副", "消防隊"].includes(pos)) {
+                        circleColor = '#ef4444'; // 消防隊 (赤)
+                    } else if (["救急隊長", "救急副", "救急隊"].includes(pos)) {
+                        circleColor = '#3b82f6'; // 救急隊 (青)
+                    } else if (["救助隊長", "救助副", "救助隊"].includes(pos)) {
+                        circleColor = '#f97316'; // 救助隊 (オレンジ)
+                    }
                 }
+                teamCircle.style.backgroundColor = circleColor;
+                teamCircle.style.border = `1px solid ${circleColor === '#9ca3af' ? '#cbd5e1' : 'rgba(0,0,0,0.1)'}`;
+                nameArea.appendChild(teamCircle);
                 
                 const nameSpan = document.createElement('span');
                 nameSpan.style.fontWeight = '500';
@@ -4362,13 +4370,6 @@ function renderVehicleView() {
                     badge.className = 'qual-badge qual-badge-paramedic';
                     badge.textContent = '救';
                     badge.title = '救急救命士';
-                    qualsArea.appendChild(badge);
-                }
-                if (staff.isRescue) {
-                    const badge = document.createElement('span');
-                    badge.className = 'qual-badge qual-badge-rescue';
-                    badge.textContent = 'R';
-                    badge.title = '救助隊員';
                     qualsArea.appendChild(badge);
                 }
                 if (staff.isKikan) {
@@ -4556,7 +4557,6 @@ function renderVehicleView() {
             if (staff.isKikan) quals.push('機');
             if (staff.hasLargeLicense) quals.push('大');
             if (staff.isParamedic) quals.push('救');
-            if (staff.isRescue) quals.push('R');
             if (quals.length > 0) {
                 opt.textContent += ` (${quals.join(',')})`;
             }
