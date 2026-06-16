@@ -728,7 +728,7 @@ const Dashboard = {
         
         // 曜日の位置合わせのための空マス
         for (let i = 0; i < firstDayOfWeek; i++) {
-            gridHtml += `<div style="background:transparent; border:1px solid transparent; min-height:80px;"></div>`;
+            gridHtml += `<div style="background:transparent; border:1px solid transparent; min-height:68px;"></div>`;
         }
         
         // 日付セルの生成
@@ -784,7 +784,7 @@ const Dashboard = {
             }
             
             gridHtml += `
-                <div class="calendar-day-cell" style="min-height:80px; padding:6px; border-radius:8px; display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; position:relative; box-sizing:border-box; ${cellStyle}">
+                <div class="calendar-day-cell" style="min-height:68px; padding:6px; border-radius:8px; display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; position:relative; box-sizing:border-box; ${cellStyle}">
                     <span style="font-size:13px; font-weight:700; color:${dateColor};">${item.day}</span>
                     ${holidayHtml}
                     <div style="display:flex; flex-direction:column; gap:2px; width:100%; margin-top:auto; align-items:flex-start;">
@@ -863,7 +863,7 @@ const Dashboard = {
             </div>
         `;
         
-        Portal.showModal(title, content);
+        Portal.showModal(title, content, { maxWidth: '720px' });
     },
 
     /**

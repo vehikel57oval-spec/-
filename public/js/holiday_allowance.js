@@ -314,7 +314,7 @@ const HolidayAllowance = {
                 </div>
             `;
 
-            Portal.showModal(title, contentHtml);
+            Portal.showModal(title, contentHtml, { maxWidth: '820px' });
             
             // カレンダーマス目のクリックバインド
             this.bindCalendarEvents();

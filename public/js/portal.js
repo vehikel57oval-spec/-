@@ -448,10 +448,16 @@ const Portal = {
     /**
      * モーダルオープン
      */
-    showModal(title, contentHtml) {
+    showModal(title, contentHtml, options = {}) {
         const modal = document.getElementById('modal-container');
         const body = document.getElementById('modal-body');
         if (!modal || !body) return;
+        
+        const content = modal.querySelector('.modal-content');
+        if (content) {
+            content.style.maxWidth = options.maxWidth || '';
+            content.style.width = options.width || '';
+        }
         
         body.innerHTML = `
             <h3 class="modal-title">${title}</h3>
@@ -465,6 +471,11 @@ const Portal = {
     closeModal() {
         const modal = document.getElementById('modal-container');
         if (modal) modal.style.display = 'none';
+        const content = modal ? modal.querySelector('.modal-content') : null;
+        if (content) {
+            content.style.maxWidth = '';
+            content.style.width = '';
+        }
     },
 
     /* ==========================================================================
