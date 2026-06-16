@@ -4227,31 +4227,19 @@ function renderVehicleView() {
     if (staffListEl) {
         staffListEl.innerHTML = '';
         
-        // 隊グループの定義（上から順に表示）
-        const teamGroups = [
-            { title: "小隊長・各隊長等", positions: ["小隊長", "消防隊長", "救急隊長", "救助隊長", "主幹", "庶務経理"] },
-            { title: "消防隊", positions: ["消防隊", "消防副"] },
-            { title: "救急隊", positions: ["救急隊", "救急副"] },
-            { title: "救助隊", positions: ["救助隊", "救助副"] },
-            { title: "未選択・その他", positions: null }
+        // 階級グループの定義（上から順に表示）
+        const rankGroups = [
+            { title: "消防司令", ranks: ["消防司令"] },
+            { title: "消防司令補", ranks: ["消防司令補"] },
+            { title: "消防士長", ranks: ["消防士長"] },
+            { title: "消防副士長", ranks: ["消防副士長"] },
+            { title: "消防士", ranks: ["消防士"] }
         ];
 
         let isFirstGroup = true;
-        teamGroups.forEach(group => {
-            const membersInGroup = onDutyStaff.filter(staff => {
-                if (group.positions === null) {
-                    const allDefinedPositions = [
-                        "小隊長", "消防隊長", "救急隊長", "救助隊長", "主幹", "庶務経理",
-                        "消防隊", "消防副",
-                        "救急隊", "救急副",
-                        "救助隊", "救助副"
-                    ];
-                    return !staff.position || !allDefinedPositions.includes(staff.position);
-                }
-                return group.positions.includes(staff.position);
-            });
-            
-            if (membersInGroup.length === 0) return; // このグループの職員がいない場合は表示しない
+        rankGroups.forEach(group => {
+            const membersInGroup = onDutyStaff.filter(staff => group.ranks.includes(staff.rank));
+            if (membersInGroup.length === 0) return; // この階級の職員がいない場合は表示しない
             
             // グループヘッダーの作成
             const groupHeader = document.createElement('div');
