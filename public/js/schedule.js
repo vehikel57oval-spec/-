@@ -1695,6 +1695,29 @@ function getRankAbbr(rank) {
     return "消防士";
 }
 
+function getPositionAbbr(pos) {
+    if (pos === "小隊長") return "小隊";
+    if (pos === "消防隊長") return "消隊";
+    if (pos === "救急隊長") return "救隊";
+    if (pos === "救助隊長") return "助隊";
+    if (pos === "庶務経理") return "庶務";
+    if (pos === "主幹") return "主幹";
+    if (pos === "消防副") return "消副";
+    if (pos === "救助副") return "助副";
+    if (pos === "救急副") return "救副";
+    if (pos === "消防隊") return "消隊";
+    if (pos === "救急隊") return "救隊";
+    if (pos === "救助隊") return "助隊";
+    return pos || "";
+}
+
+function getPositionClass(pos) {
+    if (["小隊長", "消防隊長", "消防副", "消防隊"].includes(pos)) return "pos-fire";
+    if (["救急隊長", "救急副", "救急隊"].includes(pos)) return "pos-ambulance";
+    if (["救助隊長", "救助副", "救助隊"].includes(pos)) return "pos-rescue";
+    return "pos-general";
+}
+
 function getPositionOptions(rank) {
     if (rank === "消防司令" || rank === "消防司令補") {
         return ["", "小隊長", "消防隊長", "救急隊長", "救助隊長", "庶務経理", "主幹"];
@@ -4213,21 +4236,33 @@ function renderVehicleView() {
     if (staffListEl) {
         staffListEl.innerHTML = '';
         
-        // 階級グループの定義（上から順に表示）
-        const rankGroups = [
-            { title: "消防司令", ranks: ["消防司令"] },
-            { title: "消防司令補", ranks: ["消防司令補"] },
-            { title: "消防士長", ranks: ["消防士長"] },
-            { title: "消防副士長", ranks: ["消防副士長"] },
-            { title: "消防士", ranks: ["消防士"] }
+        // 隊グループの定義（上から順に表示）
+        const teamGroups = [
+            { title: "小隊長・各隊長等", positions: ["小隊長", "消防隊長", "救急隊長", "救助隊長", "主幹", "庶務経理"] },
+            { title: "消防隊", positions: ["消防隊", "消防副"] },
+            { title: "救急隊", positions: ["救急隊", "救急副"] },
+            { title: "救助隊", positions: ["救助隊", "救助副"] },
+            { title: "未選択・その他", positions: null }
         ];
 
         let isFirstGroup = true;
-        rankGroups.forEach(group => {
-            const membersInGroup = onDutyStaff.filter(staff => group.ranks.includes(staff.rank));
-            if (membersInGroup.length === 0) return; // この階級の職員がいない場合は表示しない
+        teamGroups.forEach(group => {
+            const membersInGroup = onDutyStaff.filter(staff => {
+                if (group.positions === null) {
+                    const allDefinedPositions = [
+                        "小隊長", "消防隊長", "救急隊長", "救助隊長", "主幹", "庶務経理",
+                        "消防隊", "消防副",
+                        "救急隊", "救急副",
+                        "救助隊", "救助副"
+                    ];
+                    return !staff.position || !allDefinedPositions.includes(staff.position);
+                }
+                return group.positions.includes(staff.position);
+            });
             
-            // 階級グループヘッダーの作成
+            if (membersInGroup.length === 0) return; // このグループの職員がいない場合は表示しない
+            
+            // グループヘッダーの作成
             const groupHeader = document.createElement('div');
             groupHeader.className = 'vehicle-staff-group-header';
             groupHeader.style.fontSize = '11px';
@@ -4281,16 +4316,18 @@ function renderVehicleView() {
                     item.style.background = 'var(--secondary-bg)';
                 }
                 
-                // 名前と階級
+                // 名前と隊
                 const nameArea = document.createElement('div');
                 nameArea.style.display = 'flex';
                 nameArea.style.alignItems = 'center';
                 nameArea.style.gap = '8px';
                 
-                const rankBadge = document.createElement('span');
-                rankBadge.className = 'staff-rank-badge';
-                rankBadge.textContent = getRankAbbr(staff.rank);
-                nameArea.appendChild(rankBadge);
+                if (staff.position) {
+                    const posBadge = document.createElement('span');
+                    posBadge.className = `staff-position-badge ${getPositionClass(staff.position)}`;
+                    posBadge.textContent = getPositionAbbr(staff.position);
+                    nameArea.appendChild(posBadge);
+                }
                 
                 const nameSpan = document.createElement('span');
                 nameSpan.style.fontWeight = '500';
