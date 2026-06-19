@@ -5,6 +5,7 @@
 const HolidayAllowance = {
     activeYearMonth: '',
     activeStationId: 'all',
+    activePlatoon: 'all',
     results: [],
     currentStaffDetail: null,
 
@@ -21,7 +22,7 @@ const HolidayAllowance = {
         }
 
         // 所属の初期値 (chiefの場合は本人の署に固定、それ以外はall)
-        if (Auth.user.role === 'chief') {
+        if (Auth.user.role === 'chief' && Auth.user.station_id !== undefined && Auth.user.station_id !== null) {
             this.activeStationId = Auth.user.station_id.toString();
         }
 
@@ -55,6 +56,14 @@ const HolidayAllowance = {
                             <option value="1" ${this.activeStationId === '1' ? 'selected' : ''}>指宿消防署 (本署)</option>
                             <option value="2" ${this.activeStationId === '2' ? 'selected' : ''}>山川分遣所 (北署)</option>
                             <option value="3" ${this.activeStationId === '3' ? 'selected' : ''}>開聞分遣所 (南署)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0; width:160px;">
+                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">勤務部区分（小隊）</label>
+                        <select class="form-input" id="filter-allowance-platoon" style="padding:4px 10px; height:32px; font-size:13px;">
+                            <option value="all" ${this.activePlatoon === 'all' ? 'selected' : ''}>すべて</option>
+                            <option value="1bu" ${this.activePlatoon === '1bu' ? 'selected' : ''}>A日 (1部)</option>
+                            <option value="2bu" ${this.activePlatoon === '2bu' ? 'selected' : ''}>B日 (2部)</option>
                         </select>
                     </div>
                     <button class="btn btn-primary" id="btn-allowance-load" style="height:32px; padding:0 16px; font-size:13px; display:flex; align-items:center; gap:6px;">
@@ -98,6 +107,11 @@ const HolidayAllowance = {
         });
         document.getElementById('filter-allowance-station').addEventListener('change', (e) => {
             this.activeStationId = e.target.value;
+            this.renderTable();
+        });
+        document.getElementById('filter-allowance-platoon').addEventListener('change', (e) => {
+            this.activePlatoon = e.target.value;
+            this.renderTable();
         });
         document.getElementById('btn-allowance-load').addEventListener('click', () => this.loadData());
         
@@ -162,6 +176,11 @@ const HolidayAllowance = {
             filtered = this.results.filter(x => x.station_id === targetStationId);
         }
 
+        // 勤務部区分（小隊）フィルター
+        if (this.activePlatoon && this.activePlatoon !== 'all') {
+            filtered = filtered.filter(x => x.platoon === this.activePlatoon);
+        }
+
         if (filtered.length === 0) {
             tbody.innerHTML = `
                 <tr>
@@ -176,11 +195,11 @@ const HolidayAllowance = {
         tbody.innerHTML = filtered.map(row => {
             let statusBadge = '';
             if (row.status === 'locked') {
-                statusBadge = `<span class="badge" style="background:var(--success-light); color:var(--success); border:1px solid rgba(0,200,80,0.2); font-size:11px;">確定ロック済</span>`;
+                statusBadge = `<span class="badge" style="background:var(--success-light); color:var(--success); border:1px solid rgba(0,200,80,0.2); font-size:11px; padding:3px 8px; width:auto; height:auto; white-space:nowrap; display:inline-flex; align-items:center; justify-content:center; font-weight:600;">確定ロック済</span>`;
             } else if (row.status === 'draft') {
-                statusBadge = `<span class="badge" style="background:var(--warning-light); color:var(--warning); border:1px solid rgba(255,160,0,0.2); font-size:11px;">手動調整中</span>`;
+                statusBadge = `<span class="badge" style="background:var(--warning-light); color:var(--warning); border:1px solid rgba(255,160,0,0.2); font-size:11px; padding:3px 8px; width:auto; height:auto; white-space:nowrap; display:inline-flex; align-items:center; justify-content:center; font-weight:600;">手動調整中</span>`;
             } else {
-                statusBadge = `<span class="badge" style="background:var(--primary-light); color:var(--primary-color); border:1px solid rgba(79,70,229,0.2); font-size:11px;">自動計算中</span>`;
+                statusBadge = `<span class="badge" style="background:var(--primary-light); color:var(--primary-color); border:1px solid rgba(79,70,229,0.2); font-size:11px; padding:3px 8px; width:auto; height:auto; white-space:nowrap; display:inline-flex; align-items:center; justify-content:center; font-weight:600;">自動計算</span>`;
             }
 
             const platoonName = row.platoon === '1bu' ? 'A日 (1部)' : (row.platoon === '2bu' ? 'B日 (2部)' : '日勤');
@@ -383,9 +402,9 @@ const HolidayAllowance = {
             // 時間表示
             let hoursLabel = '';
             if (item.hours > 0) {
-                hoursLabel = `<span class="badge" style="background:var(--primary-color); color:#fff; font-size:9px; padding:1px 4px; font-weight:bold; position:absolute; bottom:4px; right:4px;">${item.hours}h</span>`;
+                hoursLabel = `<span class="badge" style="background:var(--primary-color); color:#fff; font-size:9px; padding:2px 4px; font-weight:bold; position:absolute; bottom:4px; right:4px; width:auto; height:auto; border-radius:3px;">${item.hours}h</span>`;
             } else if (item.is_cut) {
-                hoursLabel = `<span class="badge" style="background:#ef4444; color:#fff; font-size:9px; padding:1px 4px; font-weight:bold; position:absolute; bottom:4px; right:4px; text-decoration:none;">カット</span>`;
+                hoursLabel = `<span class="badge" style="background:#ef4444; color:#fff; font-size:9px; padding:2px 4px; font-weight:bold; position:absolute; bottom:4px; right:4px; text-decoration:none; width:auto; height:auto; border-radius:3px;">カット</span>`;
             }
 
             // 週休との重なりインジケータ (スライド元)

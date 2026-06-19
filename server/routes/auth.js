@@ -110,7 +110,7 @@ router.get('/me', verifyToken, (req, res) => {
         const query = `
             SELECT s.id, s.employee_number, s.name, s.role, s.platoon, s.rank, 
                    s.has_large_license, s.is_paramedic, s.is_rescue, s.is_kikan, 
-                   s.is_day_worker, s.annual_leave_balance,
+                   s.is_day_worker, s.annual_leave_balance, s.department_id, s.station_id,
                    fd.name as department_name, st.name as station_name 
             FROM staff s
             JOIN fire_departments fd ON s.department_id = fd.id

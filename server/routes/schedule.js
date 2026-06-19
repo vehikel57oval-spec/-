@@ -220,6 +220,16 @@ function getEndDateStr(startDateStr) {
     return `${y}-${m}-${d}`;
 }
 
+// サイクル番号に応じて起算日をシフトするヘルパー
+function getShiftedStartDateStr(startDateStr, cycleNumber) {
+    const start = new Date(startDateStr.replace(/-/g, '/'));
+    start.setDate(start.getDate() + (cycleNumber - 1) * 28);
+    const y = start.getFullYear();
+    const m = String(start.getMonth() + 1).padStart(2, '0');
+    const d = String(start.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
 /**
  * @route   GET /api/schedule/my-schedule
  * @desc    ログインユーザーの当月のスケジュールをカレンダー表示用に取得
@@ -308,7 +318,9 @@ router.get('/roster', verifyToken, (req, res) => {
     }
 
     try {
-        const endDateStr = getEndDateStr(startDateStr);
+        const cycleNum = parseInt(req.query.cycle_number) || 1;
+        const shiftedStartDateStr = getShiftedStartDateStr(startDateStr, cycleNum);
+        const endDateStr = getEndDateStr(shiftedStartDateStr);
 
         // 1. 職員リストの取得
         const staff = db.prepare(`
@@ -388,7 +400,7 @@ router.get('/roster', verifyToken, (req, res) => {
             scheduleEntries = db.prepare(`
                 SELECT * FROM schedule_entries 
                 WHERE staff_id IN (${staffIds.join(',')}) AND work_date BETWEEN ? AND ?
-            `).all(startDateStr, endDateStr);
+            `).all(shiftedStartDateStr, endDateStr);
         }
 
         // 3. 稼働車両設定の取得
@@ -399,7 +411,7 @@ router.get('/roster', verifyToken, (req, res) => {
         const assignments = db.prepare(`
             SELECT * FROM vehicle_assignments 
             WHERE station_id = ? AND work_date BETWEEN ? AND ?
-        `).all(stationId, startDateStr, endDateStr);
+        `).all(stationId, shiftedStartDateStr, endDateStr);
 
         // クライアントが処理しやすい形式にvehicleAssignmentsをマッピング
         // { "YYYY-MM-DD": { "車両名": { "役割": "職員ID", ... } } }
@@ -415,11 +427,10 @@ router.get('/roster', verifyToken, (req, res) => {
         });
 
         // 5. 週休希望（leave_requestsのweekly_offかつapprovedのもの）を取得してhopeShiftsにマッピング
-        const cycleNum = parseInt(req.query.cycle_number) || 1;
         const leaves = db.prepare(`
             SELECT * FROM leave_requests 
             WHERE status = 'approved' AND leave_type = 'weekly_off' AND start_date BETWEEN ? AND ?
-        `).all(startDateStr, endDateStr);
+        `).all(shiftedStartDateStr, endDateStr);
 
         const hopeShifts = {};
         mappedStaff.forEach(s => {
@@ -432,7 +443,7 @@ router.get('/roster', verifyToken, (req, res) => {
                 hopeShifts[key] = {};
             }
             
-            const start = new Date(startDateStr.replace(/-/g, '/'));
+            const start = new Date(shiftedStartDateStr.replace(/-/g, '/'));
             const target = new Date(lr.start_date.replace(/-/g, '/'));
             const diffTime = target - start;
             const dayIndex = Math.round(diffTime / (1000 * 60 * 60 * 24));
@@ -468,8 +479,10 @@ router.post('/save', verifyToken, requireRole('admin', 'sysadmin', 'chief'), (re
     }
 
     try {
-        const start = new Date(start_date.replace(/-/g, '/'));
-        const endDateStr = getEndDateStr(start_date);
+        const cycleNum = parseInt(cycle_number) || 1;
+        const shiftedStartDateStr = getShiftedStartDateStr(start_date, cycleNum);
+        const shiftedEndDateStr = getEndDateStr(shiftedStartDateStr);
+        const shiftedStart = new Date(shiftedStartDateStr.replace(/-/g, '/'));
 
         // トランザクションで保存処理を一括実行
         const saveTx = db.transaction(() => {
@@ -497,9 +510,9 @@ router.post('/save', verifyToken, requireRole('admin', 'sysadmin', 'chief'), (re
 
             // 2. 車両配置の保存
             if (vehicleAssignments) {
-                db.prepare('DELETE FROM vehicle_assignments WHERE station_id = ? AND work_date BETWEEN ? AND ?').run(station_id, start_date, endDateStr);
+                db.prepare('DELETE FROM vehicle_assignments WHERE station_id = ? AND work_date BETWEEN ? AND ?').run(station_id, shiftedStartDateStr, shiftedEndDateStr);
                 for (const [dateStr, vehiclesObj] of Object.entries(vehicleAssignments)) {
-                    if (dateStr >= start_date && dateStr <= endDateStr) {
+                    if (dateStr >= shiftedStartDateStr && dateStr <= shiftedEndDateStr) {
                         for (const [vehicleName, rolesObj] of Object.entries(vehiclesObj)) {
                             for (const [roleName, staffIdStr] of Object.entries(rolesObj)) {
                                 if (staffIdStr) {
@@ -523,8 +536,8 @@ router.post('/save', verifyToken, requireRole('admin', 'sysadmin', 'chief'), (re
                 if (isNaN(mappedStaffId)) continue;
 
                 for (let d = 0; d < 28; d++) {
-                    const dObj = new Date(start);
-                    dObj.setDate(start.getDate() + d);
+                    const dObj = new Date(shiftedStart);
+                    dObj.setDate(shiftedStart.getDate() + d);
                     const year = dObj.getFullYear();
                     const month = String(dObj.getMonth() + 1).padStart(2, '0');
                     const day = String(dObj.getDate()).padStart(2, '0');
@@ -569,8 +582,10 @@ router.post('/confirm', verifyToken, requireRole('admin', 'sysadmin', 'chief'), 
     }
 
     try {
-        const start = new Date(start_date.replace(/-/g, '/'));
-        const endDateStr = getEndDateStr(start_date);
+        const cycleNum = parseInt(cycle_number) || 1;
+        const shiftedStartDateStr = getShiftedStartDateStr(start_date, cycleNum);
+        const shiftedEndDateStr = getEndDateStr(shiftedStartDateStr);
+        const shiftedStart = new Date(shiftedStartDateStr.replace(/-/g, '/'));
         const nowStr = new Date().toISOString();
 
         // トランザクションで保存・確定・勤怠生成を実行
@@ -598,9 +613,9 @@ router.post('/confirm', verifyToken, requireRole('admin', 'sysadmin', 'chief'), 
             }
 
             if (vehicleAssignments) {
-                db.prepare('DELETE FROM vehicle_assignments WHERE station_id = ? AND work_date BETWEEN ? AND ?').run(station_id, start_date, endDateStr);
+                db.prepare('DELETE FROM vehicle_assignments WHERE station_id = ? AND work_date BETWEEN ? AND ?').run(station_id, shiftedStartDateStr, shiftedEndDateStr);
                 for (const [dateStr, vehiclesObj] of Object.entries(vehicleAssignments)) {
-                    if (dateStr >= start_date && dateStr <= endDateStr) {
+                    if (dateStr >= shiftedStartDateStr && dateStr <= shiftedEndDateStr) {
                         for (const [vehicleName, rolesObj] of Object.entries(vehiclesObj)) {
                             for (const [roleName, staffIdStr] of Object.entries(rolesObj)) {
                                 if (staffIdStr) {
@@ -644,8 +659,8 @@ router.post('/confirm', verifyToken, requireRole('admin', 'sysadmin', 'chief'), 
                 if (isNaN(mappedStaffId)) continue;
 
                 for (let d = 0; d < 28; d++) {
-                    const dObj = new Date(start);
-                    dObj.setDate(start.getDate() + d);
+                    const dObj = new Date(shiftedStart);
+                    dObj.setDate(shiftedStart.getDate() + d);
                     const year = dObj.getFullYear();
                     const month = String(dObj.getMonth() + 1).padStart(2, '0');
                     const day = String(dObj.getDate()).padStart(2, '0');

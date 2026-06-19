@@ -749,29 +749,23 @@ async function loadDataFromAPI() {
             }
         });
 
-        const start = new Date(state.startDate.replace(/-/g, '/'));
-
         // DBから取得したスケジュールエントリーの割り当て
         if (data.scheduleEntries && data.scheduleEntries.length > 0) {
             data.scheduleEntries.forEach(entry => {
                 const staffId = entry.staff_id.toString();
-                const dateStr = entry.work_date;
-                const entryDate = new Date(dateStr.replace(/-/g, '/'));
+                const { cycle, dayIndex } = getCycleAndDayFromDate(entry.work_date);
                 
-                const diffTime = entryDate.getTime() - start.getTime();
-                const dayIdx = Math.round(diffTime / (1000 * 60 * 60 * 24));
-                
-                if (dayIdx >= 0 && dayIdx < 28) {
+                if (cycle === state.activeCycle) {
                     const rosterKey = `${state.activeCycle}_${staffId}`;
                     if (state.roster[rosterKey]) {
-                        state.roster[rosterKey][dayIdx] = entry.shift_key;
+                        state.roster[rosterKey][dayIndex] = entry.shift_key;
                         
                         if (entry.is_confirmed) {
                             state.isConfirmed = true;
                         }
 
                         if (entry.start_time && entry.end_time) {
-                            const hourlyKey = `${state.activeCycle}_${staffId}_${dayIdx}`;
+                            const hourlyKey = `${state.activeCycle}_${staffId}_${dayIndex}`;
                             const staffMember = state.staffList.find(x => x.id === staffId);
                             const isDayWorker = staffMember ? !!staffMember.isDayWorker : false;
                             state.hourlyLeaves[hourlyKey] = {
@@ -938,7 +932,10 @@ async function render(container) {
                         <input type="date" class="form-control" id="input-start-date" style="font-size:12px; padding:4px 8px; height:28px;">
                     </div>
                     <div class="form-group">
-                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">表示サイクル</label>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <label class="form-label" style="font-size:11px; margin-bottom:0;">表示サイクル</label>
+                            <span id="label-cycle-range" style="font-size:11px; color:var(--text-secondary); font-weight:normal;"></span>
+                        </div>
                         <select class="form-control" id="select-cycle" style="font-size:12px; padding:2px 8px; height:28px;">
                             ${[...Array(13)].map((_, i) => `<option value="${i+1}">第 ${i+1} サイクル</option>`).join('')}
                         </select>
@@ -965,7 +962,7 @@ async function render(container) {
                     </div>
                     <div class="form-group admin-only" style="display: flex; align-items: center; gap: 8px; margin-top:4px; margin-bottom:0;">
                         <input type="checkbox" id="chk-auto-leave" style="width: 16px; height: 16px; cursor: pointer;">
-                        <label class="form-label" for="chk-auto-leave" style="margin-bottom: 0; cursor: pointer; font-size:11px;">余剰日に休暇を自動挿入</label>
+                        <label class="form-label" for="chk-auto-leave" style="margin-bottom: 0; cursor: pointer; font-size:11px;">余剰日に年休を自動挿入（祝日・年末年始除く）</label>
                     </div>
                 </section>
 
@@ -1430,6 +1427,7 @@ async function render(container) {
 
     // 初回描画
     refreshUI();
+    handleDateChange(true);
 }
 
 // テーマ（ライト/ダーク）の初期化
@@ -1616,6 +1614,36 @@ function generateEmptyRoster() {
     }
 }
 
+// ===================================================
+// 年間（暦年）の累積年休取得日数を全サイクルから集計
+// ===================================================
+function getYearlyAnnualLeaveCounts(targetYear) {
+    const counts = {};
+    state.staffList.forEach(s => { counts[s.id] = 0; });
+
+    Object.keys(state.roster).forEach(key => {
+        // キー形式: "サイクル番号_職員ID"
+        const underscoreIdx = key.indexOf('_');
+        if (underscoreIdx === -1) return;
+        const cycleNum = parseInt(key.slice(0, underscoreIdx));
+        const staffId = parseInt(key.slice(underscoreIdx + 1));
+        if (isNaN(cycleNum) || isNaN(staffId)) return;
+
+        // そのサイクルの開始日が対象年（暦年）に含まれるか確認
+        const cycleStart = new Date(state.startDate);
+        cycleStart.setDate(cycleStart.getDate() + (cycleNum - 1) * 28);
+        if (cycleStart.getFullYear() !== targetYear) return;
+
+        const schedule = state.roster[key] || [];
+        const annualCount = schedule.filter(s => s === '有').length;
+        if (counts[staffId] !== undefined) {
+            counts[staffId] += annualCount;
+        }
+    });
+
+    return counts; // { staffId: 年間年休日数合計, ... }
+}
+
 // 余剰人員日への年休（有）自動割当ロジック
 function adjustSurplusLeaves(cycleNum, platoonNum) {
     console.log(`=== adjustSurplusLeaves START (cycle: ${cycleNum}, platoon: ${platoonNum}) ===`);
@@ -1623,15 +1651,59 @@ function adjustSurplusLeaves(cycleNum, platoonNum) {
     const minSub = state.minSubOfficer;
     const minLarge = state.minLarge;
     const minPara = state.minParamedic;
-    console.log(`Settings - minStaff: ${minStaff}, minSub: ${minSub}, minLarge: ${minLarge}, minPara: ${minPara}`);
+    const YEARLY_TARGET = 20; // 年間年休目標日数（上限）
+    console.log(`Settings - minStaff: ${minStaff}, YEARLY_TARGET: ${YEARLY_TARGET}`);
+
+    // このサイクルが属する暦年を取得
+    const cycleStartDate = new Date(state.startDate);
+    cycleStartDate.setDate(cycleStartDate.getDate() + (cycleNum - 1) * 28);
+    const targetYear = cycleStartDate.getFullYear();
+
+    // 年間累積年休カウント（全サイクル横断）を取得
+    // ※ 現在処理中のサイクルはまだ確定していないため、state.rosterから取得する
+    const yearlyCounts = getYearlyAnnualLeaveCounts(targetYear);
+    console.log('Yearly annual leave counts:', yearlyCounts);
+
+    // 祝日または年末年始かどうかの判定
+    function isHolidayOrNewYear(dayIndex) {
+        const activeStartDate = new Date(state.startDate);
+        activeStartDate.setDate(activeStartDate.getDate() + (cycleNum - 1) * 28);
+        
+        const date = new Date(activeStartDate);
+        date.setDate(activeStartDate.getDate() + dayIndex);
+        
+        // 祝日の判定
+        const holidayName = getJapaneseHoliday(date);
+        if (holidayName) return true;
+        
+        // 年末年始の判定 (12/29 〜 1/3)
+        const month = date.getMonth() + 1;
+        const day = date.getDate();
+        if ((month === 12 && day >= 29) || (month === 1 && day <= 3)) {
+            return true;
+        }
+        
+        return false;
+    }
     
-    // 対象の正規職員リスト（応援職員を除き、指定小隊の職員で、かつこのサイクルで当番日「当」が1日以上ある職員のみ）
+    // 対象の正規職員リスト
+    // ・応援職員を除く
+    // ・指定小隊の職員
+    // ・このサイクルで当番日「当」が1日以上ある職員
+    // ・年間年休累積が年間目標（20日）に達していない職員のみ
     const targetStaff = state.staffList.filter(staff => {
         if (staff.isSupport) return false;
         if (staff.platoon !== platoonNum) return false;
         const key = `${cycleNum}_${staff.id}`;
         const schedule = state.roster[key] || [];
-        return schedule.includes('当');
+        if (!schedule.includes('当')) return false;
+        // 年間上限チェック
+        const currentYearly = yearlyCounts[staff.id] || 0;
+        if (currentYearly >= YEARLY_TARGET) {
+            console.log(`[Skip] ${staff.name}: Already reached yearly target (${currentYearly}/${YEARLY_TARGET} days)`);
+            return false;
+        }
+        return true;
     });
     if (targetStaff.length === 0) {
         console.log(`No active staff for surplus leaves adjustment in platoon ${platoonNum}.`);
@@ -1645,8 +1717,10 @@ function adjustSurplusLeaves(cycleNum, platoonNum) {
             return false;
         }
 
+        // 対象小隊のみカウント（全小隊合算では誤った余剰判定になるため）
         let onDuty = [];
         state.staffList.forEach(s => {
+            if (s.platoon !== platoonNum) return; // 対象小隊以外を除外
             const k = `${cycleNum}_${s.id}`;
             const shift = (rosterState[k] && rosterState[k][day]) || '-';
             if (shift === '当') {
@@ -1697,6 +1771,7 @@ function adjustSurplusLeaves(cycleNum, platoonNum) {
         for (let d = 0; d < 28; d++) {
             let onDutyCount = 0;
             state.staffList.forEach(s => {
+                if (s.platoon !== platoonNum) return; // 対象小隊のみカウント
                 const key = `${cycleNum}_${s.id}`;
                 const shift = (rosterState[key] && rosterState[key][d]) || '-';
                 if (shift === '当') {
@@ -1709,91 +1784,74 @@ function adjustSurplusLeaves(cycleNum, platoonNum) {
         return surplus;
     }
 
-    let lastConfirmedRoster = JSON.parse(JSON.stringify(state.roster));
-    let currentRoster = JSON.parse(JSON.stringify(state.roster));
+    // ================================================================
+    // グリーディ割当ループ
+    // 「全員取得できなければロールバック」方式を廃止。
+    // 取得できる職員から順次割り当て、取得できない職員は
+    // 次サイクルで年間累積が少ない分だけ自動的に優先される。
+    // ================================================================
+    const localYearlyCounts = { ...yearlyCounts }; // ループ内での更新用ローカルコピー
+    let workingRoster = JSON.parse(JSON.stringify(state.roster));
 
-    let round = 1;
-    while (true) {
-        console.log(`--- Round ${round} Start ---`);
-        let tempRoster = JSON.parse(JSON.stringify(currentRoster));
-        
-        const assignedInRound = {};
-        targetStaff.forEach(s => {
-            assignedInRound[s.id] = false;
+    let madeChange = true;
+    let totalAssigned = 0;
+
+    while (madeChange) {
+        madeChange = false;
+
+        // 現在の余剰人員を再計算
+        const daySurplus = getDaySurplus(workingRoster);
+
+        // 全候補ペア（職員×日）を収集
+        const allCandidates = [];
+
+        targetStaff.forEach(staff => {
+            const currentYearly = localYearlyCounts[staff.id] || 0;
+            if (currentYearly >= YEARLY_TARGET) return; // 年間上限到達はスキップ
+
+            for (let d = 0; d < 28; d++) {
+                if (daySurplus[d] <= 0) continue;
+                if (isHolidayOrNewYear(d)) continue;
+                if (!canTakeLeave(workingRoster, staff, d)) continue;
+
+                const hasConsec = hasConsecutiveLeave(workingRoster, staff, d);
+                allCandidates.push({
+                    staff,
+                    day: d,
+                    yearlyCount: currentYearly,
+                    surplus: daySurplus[d],
+                    hasConsec // 連休フラグ（ソフト制約）
+                });
+            }
         });
 
-        let success = true;
+        if (allCandidates.length === 0) break;
 
-        for (let step = 0; step < targetStaff.length; step++) {
-            const unassignedStaff = targetStaff.filter(s => !assignedInRound[s.id]);
-            if (unassignedStaff.length === 0) break;
+        // 優先順位:
+        // 1. 連休にならない日を優先（ソフト制約）
+        // 2. 年間累積が少ない職員を優先（均等化）
+        // 3. 余剰人員が多い日を優先（安全性）
+        const nonConsec = allCandidates.filter(c => !c.hasConsec);
+        const pool = nonConsec.length > 0 ? nonConsec : allCandidates;
 
-            const daySurplus = getDaySurplus(tempRoster);
+        pool.sort((a, b) => {
+            if (a.yearlyCount !== b.yearlyCount) return a.yearlyCount - b.yearlyCount;
+            if (a.surplus !== b.surplus) return b.surplus - a.surplus;
+            return Math.random() - 0.5; // タイブレーク
+        });
 
-            // 各未割り当て職員について、割り当て可能日のリストアップ (週休隣接回避をハード制約とする)
-            const candidates = unassignedStaff.map(staff => {
-                const validDays = [];
-                for (let d = 0; d < 28; d++) {
-                    if (daySurplus[d] > 0 && canTakeLeave(tempRoster, staff, d) && !hasConsecutiveLeave(tempRoster, staff, d)) {
-                        validDays.push(d);
-                    }
-                }
-                return { staff, validDays };
-            });
-
-            // 選択肢が少ない順にソート (MRV)
-            candidates.sort((a, b) => a.validDays.length - b.validDays.length);
-
-            const targetCandidate = candidates[0];
-            if (targetCandidate.validDays.length === 0) {
-                console.log(`Round ${round}: Staff ${targetCandidate.staff.name} has no eligible days (without consecutive leaves). Round fails.`);
-                success = false;
-                break;
-            }
-
-            const staff = targetCandidate.staff;
-            let bestDay = -1;
-            let bestScore = -999999;
-
-            targetCandidate.validDays.forEach(d => {
-                let score = 0;
-                
-                // 余剰人員が多い日を優先
-                score += daySurplus[d] * 100;
-                
-                // 少しランダム値を加えてタイブレーク
-                score += Math.random() * 5;
-
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestDay = d;
-                }
-            });
-
-            if (bestDay !== -1) {
-                const key = `${cycleNum}_${staff.id}`;
-                tempRoster[key][bestDay] = '休';
-                assignedInRound[staff.id] = true;
-                console.log(`Round ${round}: Assigned '休' to ${staff.name} on Day ${bestDay + 1}`);
-            } else {
-                success = false;
-                break;
-            }
-        }
-
-        if (success) {
-            console.log(`Round ${round} Succeeded! All target staff received a holiday.`);
-            currentRoster = JSON.parse(JSON.stringify(tempRoster));
-            lastConfirmedRoster = JSON.parse(JSON.stringify(tempRoster));
-            round++;
-        } else {
-            console.log(`Round ${round} Failed. Rolling back to Round ${round - 1} results.`);
-            currentRoster = JSON.parse(JSON.stringify(lastConfirmedRoster));
-            break;
-        }
+        // 最優先候補を割り当て
+        const best = pool[0];
+        const key = `${cycleNum}_${best.staff.id}`;
+        workingRoster[key][best.day] = '有';
+        localYearlyCounts[best.staff.id] = (localYearlyCounts[best.staff.id] || 0) + 1;
+        totalAssigned++;
+        madeChange = true;
+        console.log(`Assigned '有' to ${best.staff.name} on Day ${best.day + 1} (yearly total: ${localYearlyCounts[best.staff.id]}, consecutive: ${best.hasConsec})`);
     }
 
-    state.roster = currentRoster;
+    console.log(`Total annual leaves assigned: ${totalAssigned}`);
+    state.roster = workingRoster;
     console.log(`=== adjustSurplusLeaves END ===`);}
 
 // 階級・資格の短縮名取得
@@ -3005,6 +3063,14 @@ function createTableHeader(thead, isRosterTable) {
         thSpecial.className = 'stats-header-col';
         thSpecial.rowSpan = 2;
         headerDays.appendChild(thSpecial);
+
+        // 年間年休累積列（クロスサイクル）
+        const thYearlyAnnual = document.createElement('th');
+        thYearlyAnnual.innerHTML = '年休<br>（年）';
+        thYearlyAnnual.className = 'stats-header-col';
+        thYearlyAnnual.rowSpan = 2;
+        thYearlyAnnual.title = '年間累積年休日数（暑年） / 残日数（目標8:山切に対する残り）';
+        headerDays.appendChild(thYearlyAnnual);
     }
 }
 
@@ -3148,6 +3214,66 @@ function renderRosterTable() {
             tdSpecialStat.className = 'stats-cell';
             tdSpecialStat.textContent = Number.isInteger(specialLeaveCount) ? specialLeaveCount.toString() : specialLeaveCount.toFixed(2);
             tr.appendChild(tdSpecialStat);
+
+            // 年間累積年休統計（対象暦年の全サイクル分）
+            if (!staff.isSupport && !staff.isDayWorker) {
+                const YEARLY_TARGET = 20;
+                const cycleStartDate = new Date(state.startDate);
+                cycleStartDate.setDate(cycleStartDate.getDate() + (state.activeCycle - 1) * 28);
+                const targetYear = cycleStartDate.getFullYear();
+                const yearlyCounts = getYearlyAnnualLeaveCounts(targetYear);
+                const yearlyUsed = yearlyCounts[staff.id] || 0;
+                const yearlyRemaining = YEARLY_TARGET - yearlyUsed;
+
+                const tdYearlyStat = document.createElement('td');
+                tdYearlyStat.className = 'stats-cell';
+
+                // 表示: 使用日数 / 残日数
+                const usedSpan = document.createElement('span');
+                usedSpan.style.fontWeight = '700';
+                usedSpan.style.fontSize = '12px';
+                usedSpan.textContent = yearlyUsed;
+
+                const slashSpan = document.createElement('span');
+                slashSpan.style.color = '#999';
+                slashSpan.textContent = '/';
+
+                const remainSpan = document.createElement('span');
+                remainSpan.style.fontSize = '10px';
+                remainSpan.style.fontWeight = '600';
+
+                if (yearlyRemaining <= 0) {
+                    // 上限到達: 赤
+                    usedSpan.style.color = '#dc2626';
+                    remainSpan.style.color = '#dc2626';
+                    remainSpan.textContent = '満';
+                    tdYearlyStat.title = `年間年休: ${yearlyUsed}日使用（上限に達しました）`;
+                    tdYearlyStat.style.backgroundColor = 'rgba(220,38,38,0.08)';
+                } else if (yearlyRemaining <= 5) {
+                    // 残5日以下: オレンジ警告
+                    usedSpan.style.color = '#ea580c';
+                    remainSpan.style.color = '#ea580c';
+                    remainSpan.textContent = `残${yearlyRemaining}`;
+                    tdYearlyStat.title = `年間年休: ${yearlyUsed}日使用 / 残${yearlyRemaining}日`;
+                } else {
+                    // 通常: 緑
+                    usedSpan.style.color = '#16a34a';
+                    remainSpan.style.color = '#6b7280';
+                    remainSpan.textContent = `残${yearlyRemaining}`;
+                    tdYearlyStat.title = `年間年休: ${yearlyUsed}日使用 / 残${yearlyRemaining}日`;
+                }
+
+                tdYearlyStat.appendChild(usedSpan);
+                tdYearlyStat.appendChild(slashSpan);
+                tdYearlyStat.appendChild(remainSpan);
+                tr.appendChild(tdYearlyStat);
+            } else {
+                // 応援職員・日勤者は空セル
+                const tdYearlyStat = document.createElement('td');
+                tdYearlyStat.className = 'stats-cell';
+                tdYearlyStat.textContent = '-';
+                tr.appendChild(tdYearlyStat);
+            }
             
             tbody.appendChild(tr);
         });

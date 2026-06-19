@@ -16,7 +16,8 @@ let dbData = {
     deployed_vehicles: [],
     vehicle_assignments: [],
     schedule_staff_overrides: [],
-    holiday_allowance_ledgers: []
+    holiday_allowance_ledgers: [],
+    ledger_approvals: []
 };
 
 // シードデータ（初期データ）
@@ -154,6 +155,10 @@ function seedData() {
 
 function migrateData() {
     let modified = false;
+    if (!dbData.ledger_approvals) {
+        dbData.ledger_approvals = [];
+        modified = true;
+    }
     if (dbData.staff && Array.isArray(dbData.staff)) {
         dbData.staff.forEach(s => {
             if (s.position === undefined) {
@@ -438,6 +443,20 @@ class Statement {
             if (!dbData.holiday_allowance_ledgers) dbData.holiday_allowance_ledgers = [];
             const staffId = parseInt(params[1], 10);
             return dbData.holiday_allowance_ledgers.find(x => x.year_month === params[0] && parseInt(x.staff_id, 10) === staffId);
+        }
+
+        // 20-2. 出勤簿の承認ステータスの取得
+        if (sql === "SELECT * FROM ledger_approvals WHERE year_month = ? AND staff_id = ?") {
+            if (!dbData.ledger_approvals) dbData.ledger_approvals = [];
+            const staffId = parseInt(params[1], 10);
+            return dbData.ledger_approvals.find(x => x.year_month === params[0] && parseInt(x.staff_id, 10) === staffId);
+        }
+
+        // 21. schedule_staff_overrides 起算日の単一取得
+        if (sql === "SELECT start_date FROM schedule_staff_overrides LIMIT 1") {
+            if (!dbData.schedule_staff_overrides) dbData.schedule_staff_overrides = [];
+            const row = dbData.schedule_staff_overrides[0];
+            return row ? { start_date: row.start_date } : undefined;
         }
 
         console.warn('[DB MOCK UNHANDLED GET] Returning empty. SQL:', sql);
@@ -1259,6 +1278,43 @@ class Statement {
                 lastInsertRowid = id;
             }
             changes = 1;
+        }
+
+        // 出勤簿の承認/提出レコードのインサート・更新
+        else if (sql.includes("INSERT INTO ledger_approvals") || sql.includes("INSERT OR REPLACE INTO ledger_approvals")) {
+            if (!dbData.ledger_approvals) dbData.ledger_approvals = [];
+            const year_month = params[0];
+            const staff_id = parseInt(params[1], 10);
+            const status = params[2];
+            const submitted_by = params[3] ? parseInt(params[3], 10) : null;
+            const submitted_at = params[4] || null;
+            const approved_by = params[5] ? parseInt(params[5], 10) : null;
+            const approved_at = params[6] || null;
+
+            const idx = dbData.ledger_approvals.findIndex(x => x.year_month === year_month && x.staff_id === staff_id);
+            if (idx !== -1) {
+                dbData.ledger_approvals[idx].status = status;
+                dbData.ledger_approvals[idx].submitted_by = submitted_by;
+                dbData.ledger_approvals[idx].submitted_at = submitted_at;
+                dbData.ledger_approvals[idx].approved_by = approved_by;
+                dbData.ledger_approvals[idx].approved_at = approved_at;
+                lastInsertRowid = dbData.ledger_approvals[idx].id;
+            } else {
+                const id = dbData.ledger_approvals.length + 1;
+                dbData.ledger_approvals.push({
+                    id,
+                    year_month,
+                    staff_id,
+                    status,
+                    submitted_by,
+                    submitted_at,
+                    approved_by,
+                    approved_at
+                });
+                lastInsertRowid = id;
+            }
+            changes = 1;
+            saveDatabase();
         }
 
         // 祝日手当のアップデート

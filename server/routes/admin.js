@@ -450,18 +450,8 @@ router.put('/settings', verifyToken, requireRole('admin', 'sysadmin'), (req, res
 });
 
 // A当番（第1小隊当直）の日かどうかを判定する
-function isPlatoon1DutyDay(dateStr) {
-    let anchorDateStr = '2026-06-01'; // デフォルト (第1小隊当直日)
-    try {
-        const row = db.prepare('SELECT start_date FROM schedule_staff_overrides LIMIT 1').get();
-        if (row && row.start_date) {
-            anchorDateStr = row.start_date;
-        }
-    } catch (e) {
-        // ignore
-    }
-
-    const anchor = parseDate(anchorDateStr);
+function isPlatoon1DutyDay(dateStr, anchorDateStr) {
+    const anchor = parseDate(anchorDateStr || '2026-06-01');
     const target = parseDate(dateStr);
     const diffTime = Math.abs(target - anchor);
     const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24)) * (target < anchor ? -1 : 1);
@@ -490,7 +480,19 @@ function getPreviousDate(dateStr) {
 }
 
 // 祝日手当の自動計算ロジック
-function calculateHolidayAllowanceInternal(staff, yearMonth) {
+function calculateHolidayAllowanceInternal(staff, yearMonth, anchorDateStr) {
+    if (!anchorDateStr) {
+        anchorDateStr = '2026-06-01'; // デフォルト (第1小隊当直日)
+        try {
+            const row = db.prepare('SELECT start_date FROM schedule_staff_overrides LIMIT 1').get();
+            if (row && row.start_date) {
+                anchorDateStr = row.start_date;
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+
     const yearMonthParts = yearMonth.split('-');
     const year = parseInt(yearMonthParts[0], 10);
     const month = parseInt(yearMonthParts[1], 10);
@@ -532,29 +534,47 @@ function calculateHolidayAllowanceInternal(staff, yearMonth) {
     const slideQueue4 = [];
     const allowanceMap = {};
 
+    function getActualShift(dateStr, baseShift, entryMap) {
+        const raw = entryMap[dateStr];
+        if (raw && raw !== '-') return raw;
+        if (baseShift === '当') return '当';
+        if (baseShift === '非') return '明';
+        return '日';
+    }
+
     for (let day = 1; day <= daysInMonth; day++) {
         const dateStr = `${yearMonth}-${String(day).padStart(2, '0')}`;
         const holidayType = getHolidayType(dateStr);
         const isHol = (holidayType !== null);
-        const actualShift = entryMap[dateStr] || '休';
         
         let baseShift = '非';
         if (platoon === '1bu') {
-            baseShift = isPlatoon1DutyDay(dateStr) ? '当' : '非';
+            baseShift = isPlatoon1DutyDay(dateStr, anchorDateStr) ? '当' : '非';
         } else if (platoon === '2bu') {
-            baseShift = isPlatoon1DutyDay(dateStr) ? '非' : '当';
+            baseShift = isPlatoon1DutyDay(dateStr, anchorDateStr) ? '非' : '当';
         } else {
             baseShift = '日';
         }
+
+        const actualShift = getActualShift(dateStr, baseShift, entryMap);
         
         if (isHol && (platoon === '1bu' || platoon === '2bu')) {
             const isLawHoliday = (holidayType === 'national');
             
             if (baseShift === '当') {
-                if (actualShift === '休' || actualShift === '公' || leaveMap[dateStr] === 'compensatory') {
+                if (actualShift === '休' || actualShift === '公' || actualShift === '週' || leaveMap[dateStr] === 'compensatory') {
                     if (isLawHoliday) {
                         slideQueue12.push({ sourceDate: dateStr });
                     }
+                } else if (leaveMap[dateStr]) {
+                    // 有給休暇・病休・特休等の場合は勤務していないため手当対象外（カット）
+                    allowanceMap[dateStr] = {
+                        type: '当日分',
+                        original_hours: 12.0,
+                        hours: 0.0,
+                        is_cut: true,
+                        reason: 'leave_on_holiday'
+                    };
                 } else {
                     allowanceMap[dateStr] = {
                         type: '当日分',
@@ -569,23 +589,64 @@ function calculateHolidayAllowanceInternal(staff, yearMonth) {
                 const hours = isNewYear ? 3.5 : 4.0;
                 
                 const yesterdayStr = getPreviousDate(dateStr);
-                const yesterdayActualShift = entryMap[yesterdayStr] || '当'; // デフォルトは当直勤務とみなす
+                const yesterdayBaseShift = platoon === '1bu' ? (isPlatoon1DutyDay(yesterdayStr, anchorDateStr) ? '当' : '非') : (isPlatoon1DutyDay(yesterdayStr, anchorDateStr) ? '非' : '当');
+                const yesterdayActualShift = getActualShift(yesterdayStr, yesterdayBaseShift, entryMap);
                 
-                // 非番の当日に公休であっても、前日当直していたら朝の勤務が発生するためスライドしない
-                const wasOnDutyYesterday = (yesterdayActualShift === '当');
+                // 前日に当直（当）予定であり、かつ週休・公休・有給等の休暇ではない＝実際に当直勤務を行っていたこと
+                const wasOnDutyYesterday = (yesterdayBaseShift === '当') && (yesterdayActualShift !== '休' && yesterdayActualShift !== '公' && yesterdayActualShift !== '週') && !leaveMap[yesterdayStr];
                 
-                if ((actualShift === '休' || actualShift === '公' || leaveMap[dateStr] === 'compensatory') && !wasOnDutyYesterday) {
-                    if (isLawHoliday) {
-                        slideQueue4.push({ sourceDate: dateStr, hours: hours });
+                if (actualShift === '休' || actualShift === '公' || actualShift === '週' || leaveMap[dateStr] === 'compensatory') {
+                    if (wasOnDutyYesterday) {
+                        // 前日当直していたら朝の勤務が発生するため、当日公休であっても支給（スライドなし）
+                        allowanceMap[dateStr] = {
+                            type: '当日分',
+                            original_hours: hours,
+                            hours: hours,
+                            is_cut: false,
+                            reason: 'duty_on_holiday_off'
+                        };
+                    } else {
+                        if (isLawHoliday) {
+                            slideQueue4.push({ sourceDate: dateStr, hours: hours });
+                        }
+                    }
+                } else if (leaveMap[dateStr]) {
+                    if (wasOnDutyYesterday) {
+                        allowanceMap[dateStr] = {
+                            type: '当日分',
+                            original_hours: hours,
+                            hours: hours,
+                            is_cut: false,
+                            reason: 'duty_on_holiday_off'
+                        };
+                    } else {
+                        // 前日に勤務しておらず、本日も休暇の場合はカット
+                        allowanceMap[dateStr] = {
+                            type: '当日分',
+                            original_hours: hours,
+                            hours: 0.0,
+                            is_cut: true,
+                            reason: 'leave_on_holiday'
+                        };
                     }
                 } else {
-                    allowanceMap[dateStr] = {
-                        type: '当日分',
-                        original_hours: hours,
-                        hours: hours,
-                        is_cut: false,
-                        reason: 'duty_on_holiday_off'
-                    };
+                    if (wasOnDutyYesterday) {
+                        allowanceMap[dateStr] = {
+                            type: '当日分',
+                            original_hours: hours,
+                            hours: hours,
+                            is_cut: false,
+                            reason: 'duty_on_holiday_off'
+                        };
+                    } else {
+                        allowanceMap[dateStr] = {
+                            type: '当日分',
+                            original_hours: hours,
+                            hours: 0.0,
+                            is_cut: true,
+                            reason: 'no_duty_yesterday'
+                        };
+                    }
                 }
             }
         }
@@ -598,20 +659,20 @@ function calculateHolidayAllowanceInternal(staff, yearMonth) {
         
         while (!mapped && limit < 60) {
             limit++;
-            const baseShift = platoon === '1bu' ? (isPlatoon1DutyDay(targetDate) ? '当' : '非') : (isPlatoon1DutyDay(targetDate) ? '非' : '当');
-            const actualShift = entryMap[targetDate] || '休';
+            const baseShift = platoon === '1bu' ? (isPlatoon1DutyDay(targetDate, anchorDateStr) ? '当' : '非') : (isPlatoon1DutyDay(targetDate, anchorDateStr) ? '非' : '当');
+            const actualShift = getActualShift(targetDate, baseShift, entryMap);
             
-            // 本来の週休 (公休) か、後から取得した代休・振替休日かを判定
-            const isOriginalHoliday = (actualShift === '休' || actualShift === '公') && (leaveMap[targetDate] !== 'compensatory');
+            const isOriginalHoliday = (actualShift === '休' || actualShift === '公' || actualShift === '週' || getHolidayType(targetDate) !== null) && (leaveMap[targetDate] !== 'compensatory');
             
             if (baseShift === '当' && !isOriginalHoliday && !allowanceMap[targetDate]) {
-                const isCut = (leaveMap[targetDate] === 'compensatory' || actualShift === '休' || actualShift === '公');
+                // 週休・公休・有給休暇等の休暇がある場合は手当カット
+                const isCut = (actualShift === '休' || actualShift === '公' || actualShift === '週' || !!leaveMap[targetDate]);
                 allowanceMap[targetDate] = {
                     type: 'スライド分',
                     original_hours: 12.0,
                     hours: isCut ? 0.0 : 12.0,
                     is_cut: isCut,
-                    reason: isCut ? 'cut_due_to_substitute_holiday' : `slided_from_${item.sourceDate}`,
+                    reason: isCut ? (leaveMap[targetDate] === 'compensatory' ? 'cut_due_to_substitute_holiday' : 'leave_on_holiday') : `slided_from_${item.sourceDate}`,
                     source_date: item.sourceDate
                 };
                 mapped = true;
@@ -628,19 +689,19 @@ function calculateHolidayAllowanceInternal(staff, yearMonth) {
         
         while (!mapped && limit < 60) {
             limit++;
-            const baseShift = platoon === '1bu' ? (isPlatoon1DutyDay(targetDate) ? '当' : '非') : (isPlatoon1DutyDay(targetDate) ? '非' : '当');
-            const actualShift = entryMap[targetDate] || '休';
+            const baseShift = platoon === '1bu' ? (isPlatoon1DutyDay(targetDate, anchorDateStr) ? '当' : '非') : (isPlatoon1DutyDay(targetDate, anchorDateStr) ? '非' : '当');
+            const actualShift = getActualShift(targetDate, baseShift, entryMap);
             
-            const isOriginalHoliday = (actualShift === '休' || actualShift === '公') && (leaveMap[targetDate] !== 'compensatory');
+            const isOriginalHoliday = (actualShift === '休' || actualShift === '公' || actualShift === '週' || getHolidayType(targetDate) !== null) && (leaveMap[targetDate] !== 'compensatory');
             
             if (baseShift === '非' && !isOriginalHoliday && !allowanceMap[targetDate]) {
-                const isCut = (leaveMap[targetDate] === 'compensatory' || actualShift === '休' || actualShift === '公');
+                const isCut = (actualShift === '休' || actualShift === '公' || actualShift === '週' || !!leaveMap[targetDate]);
                 allowanceMap[targetDate] = {
                     type: 'スライド分',
                     original_hours: item.hours,
                     hours: isCut ? 0.0 : item.hours,
                     is_cut: isCut,
-                    reason: isCut ? 'cut_due_to_substitute_holiday' : `slided_from_${item.sourceDate}`,
+                    reason: isCut ? (leaveMap[targetDate] === 'compensatory' ? 'cut_due_to_substitute_holiday' : 'leave_on_holiday') : `slided_from_${item.sourceDate}`,
                     source_date: item.sourceDate
                 };
                 mapped = true;
@@ -655,8 +716,8 @@ function calculateHolidayAllowanceInternal(staff, yearMonth) {
         const item = allowanceMap[dateStr];
         
         const isHol = (getHolidayType(dateStr) !== null);
-        const actualShift = entryMap[dateStr] || '休';
-        const baseShift = platoon === '1bu' ? (isPlatoon1DutyDay(dateStr) ? '当' : '非') : (isPlatoon1DutyDay(dateStr) ? '非' : '当');
+        const baseShift = platoon === '1bu' ? (isPlatoon1DutyDay(dateStr, anchorDateStr) ? '当' : '非') : (isPlatoon1DutyDay(dateStr, anchorDateStr) ? '非' : '当');
+        const actualShift = getActualShift(dateStr, baseShift, entryMap);
 
         if (item) {
             details.push({
@@ -687,7 +748,7 @@ function calculateHolidayAllowanceInternal(staff, yearMonth) {
     }
     
     // 合計時間の算出
-    const totalHours = details.reduce((sum, d) => sum + d.hours, 0.0);
+    const totalHours = details.push ? details.reduce((sum, d) => sum + d.hours, 0.0) : 0.0;
     
     return {
         details,
@@ -723,6 +784,16 @@ router.get('/holiday-allowance', verifyToken, requireRole('chief', 'admin', 'sys
         query += ' ORDER BY st.id ASC, s.employee_number ASC';
         const staffList = db.prepare(query).all(...params);
         
+        let anchorDateStr = '2026-06-01'; // デフォルト (第1小隊当直日)
+        try {
+            const row = db.prepare('SELECT start_date FROM schedule_staff_overrides LIMIT 1').get();
+            if (row && row.start_date) {
+                anchorDateStr = row.start_date;
+            }
+        } catch (e) {
+            // ignore
+        }
+
         const ledgers = db.prepare('SELECT * FROM holiday_allowance_ledgers WHERE year_month = ?').all(year_month);
         const ledgerMap = {};
         ledgers.forEach(l => {
@@ -745,6 +816,7 @@ router.get('/holiday-allowance', verifyToken, requireRole('chief', 'admin', 'sys
                     platoon: staff.platoon,
                     rank: staff.rank,
                     station_name: staff.station_name,
+                    station_id: staff.station_id,
                     holiday_tou,
                     holiday_off,
                     slided_days,
@@ -753,7 +825,7 @@ router.get('/holiday-allowance', verifyToken, requireRole('chief', 'admin', 'sys
                     confirmed_at: ledger.confirmed_at
                 };
             } else {
-                const { details, totalHours } = calculateHolidayAllowanceInternal(staff, year_month);
+                const { details, totalHours } = calculateHolidayAllowanceInternal(staff, year_month, anchorDateStr);
                 
                 const holiday_tou = details.filter(d => d.type === '当日分' && d.base_shift === '当' && !d.is_cut).length;
                 const holiday_off = details.filter(d => d.type === '当日分' && d.base_shift === '非' && !d.is_cut).length;
@@ -766,6 +838,7 @@ router.get('/holiday-allowance', verifyToken, requireRole('chief', 'admin', 'sys
                     platoon: staff.platoon,
                     rank: staff.rank,
                     station_name: staff.station_name,
+                    station_id: staff.station_id,
                     holiday_tou,
                     holiday_off,
                     slided_days,
@@ -801,6 +874,16 @@ router.get('/holiday-allowance/staff/:staffId', verifyToken, requireRole('chief'
             return res.status(404).json({ error: '指定された職員が見つかりません。' });
         }
         
+        let anchorDateStr = '2026-06-01'; // デフォルト (第1小隊当直日)
+        try {
+            const row = db.prepare('SELECT start_date FROM schedule_staff_overrides LIMIT 1').get();
+            if (row && row.start_date) {
+                anchorDateStr = row.start_date;
+            }
+        } catch (e) {
+            // ignore
+        }
+
         const ledger = db.prepare('SELECT * FROM holiday_allowance_ledgers WHERE year_month = ? AND staff_id = ?').get(year_month, staffId);
         
         if (ledger) {
@@ -813,7 +896,7 @@ router.get('/holiday-allowance/staff/:staffId', verifyToken, requireRole('chief'
                 confirmed_at: ledger.confirmed_at
             });
         } else {
-            const { details, totalHours } = calculateHolidayAllowanceInternal(staff, year_month);
+            const { details, totalHours } = calculateHolidayAllowanceInternal(staff, year_month, anchorDateStr);
             res.json({
                 staff,
                 status: 'auto',
@@ -882,6 +965,16 @@ router.post('/holiday-allowance/lock', verifyToken, requireRole('chief', 'admin'
     try {
         const confirmedAt = new Date().toISOString();
         
+        let anchorDateStr = '2026-06-01'; // デフォルト (第1小隊当直日)
+        try {
+            const row = db.prepare('SELECT start_date FROM schedule_staff_overrides LIMIT 1').get();
+            if (row && row.start_date) {
+                anchorDateStr = row.start_date;
+            }
+        } catch (e) {
+            // ignore
+        }
+
         if (staff_id) {
             const existing = db.prepare('SELECT * FROM holiday_allowance_ledgers WHERE year_month = ? AND staff_id = ?').get(year_month, staff_id);
             let detailsJson, totalHours;
@@ -892,7 +985,7 @@ router.post('/holiday-allowance/lock', verifyToken, requireRole('chief', 'admin'
             } else {
                 const staff = db.prepare('SELECT * FROM staff WHERE id = ?').get(staff_id);
                 if (!staff) return res.status(404).json({ error: '職員が見つかりません。' });
-                const { details, totalHours: computedHours } = calculateHolidayAllowanceInternal(staff, year_month);
+                const { details, totalHours: computedHours } = calculateHolidayAllowanceInternal(staff, year_month, anchorDateStr);
                 detailsJson = JSON.stringify(details);
                 totalHours = computedHours;
             }
@@ -935,7 +1028,7 @@ router.post('/holiday-allowance/lock', verifyToken, requireRole('chief', 'admin'
                         detailsJson = typeof existing.details === 'string' ? existing.details : JSON.stringify(existing.details);
                         totalHours = existing.total_hours;
                     } else {
-                        const { details, totalHours: computedHours } = calculateHolidayAllowanceInternal(staff, year_month);
+                        const { details, totalHours: computedHours } = calculateHolidayAllowanceInternal(staff, year_month, anchorDateStr);
                         detailsJson = JSON.stringify(details);
                         totalHours = computedHours;
                     }
@@ -1013,4 +1106,5 @@ router.post('/holiday-allowance/unlock', verifyToken, requireRole('chief', 'admi
     }
 });
 
+router.calculateHolidayAllowanceInternal = calculateHolidayAllowanceInternal;
 module.exports = router;

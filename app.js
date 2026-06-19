@@ -908,9 +908,34 @@ function adjustSurplusLeaves(cycleNum, platoonNum) {
     const minLarge = state.minLarge;
     const minPara = state.minParamedic;
     console.log(`Settings - minStaff: ${minStaff}, minSub: ${minSub}, minLarge: ${minLarge}, minPara: ${minPara}`);
+
+    // 祝日または年末年始かどうかの判定
+    function isHolidayOrNewYear(dayIndex) {
+        const activeStartDate = new Date(state.startDate);
+        activeStartDate.setDate(activeStartDate.getDate() + (cycleNum - 1) * 28);
+        
+        const date = new Date(activeStartDate);
+        date.setDate(activeStartDate.getDate() + dayIndex);
+        
+        // 祝日の判定
+        const holidayName = getJapaneseHoliday(date);
+        if (holidayName) return true;
+        
+        // 年末年始の判定 (12/29 〜 1/3)
+        const month = date.getMonth() + 1;
+        const day = date.getDate();
+        if ((month === 12 && day >= 29) || (month === 1 && day <= 3)) {
+            return true;
+        }
+        
+        return false;
+    }
     
     // 各日（0〜27日）の余剰人員を調整するループ
     for (let d = 0; d < 28; d++) {
+        if (isHolidayOrNewYear(d)) {
+            continue;
+        }
         // 出勤している職員のリストを作成
         let onDutyStaff = [];
         state.staffList.forEach(staff => {

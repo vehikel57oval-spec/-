@@ -664,4 +664,366 @@ router.get('/weekly-off', verifyToken, (req, res) => {
     }
 });
 
+/**
+ * @route   GET /api/attendance/ledger
+ * @desc    出勤簿（月間勤務実績表）データの取得
+ */
+router.get('/ledger', verifyToken, (req, res) => {
+    const { staff_id, year, month } = req.query;
+    
+    let targetStaffId = req.user.id;
+    if (req.user.role !== 'staff' && staff_id) {
+        targetStaffId = parseInt(staff_id, 10);
+    } else if (req.user.role === 'staff' && staff_id && parseInt(staff_id, 10) !== req.user.id) {
+        return res.status(403).json({ error: '他の職員の出勤簿を閲覧する権限がありません。' });
+    }
+    
+    const y = parseInt(year, 10);
+    const m = parseInt(month, 10);
+    
+    if (isNaN(y) || isNaN(m) || m < 1 || m > 12) {
+        return res.status(400).json({ error: '有効な年月を指定してください。' });
+    }
+    
+    try {
+        // 職員情報の取得
+        const staff = db.prepare(`
+            SELECT s.id, s.name, s.employee_number, s.rank, s.platoon, s.is_day_worker, s.station_id,
+                   st.name as station_name, fd.name as department_name
+            FROM staff s
+            JOIN stations st ON s.station_id = st.id
+            JOIN fire_departments fd ON s.department_id = fd.id
+            WHERE s.id = ? AND s.is_active = 1
+        `).get(targetStaffId);
+        
+        if (!staff) {
+            return res.status(404).json({ error: '指定された職員が見つかりません。' });
+        }
+        
+        // 階級権限チェック (Chiefは自署の職員のみ閲覧可能)
+        if (req.user.role === 'chief' && staff.station_id !== req.user.station_id) {
+            return res.status(403).json({ error: '管轄外の部署の職員の出勤簿を閲覧する権限がありません。' });
+        }
+        
+        // 日付範囲の算出
+        const lastDay = new Date(y, m, 0).getDate();
+        const startDateStr = `${y}-${String(m).padStart(2, '0')}-01`;
+        const endDateStr = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        
+        // データの取得
+        const schedules = db.prepare(`
+            SELECT * FROM schedule_entries
+            WHERE staff_id = ? AND work_date BETWEEN ? AND ?
+        `).all(targetStaffId, startDateStr, endDateStr);
+        
+        const attendances = db.prepare(`
+            SELECT ar.*
+            FROM attendance_records ar
+            WHERE ar.staff_id = ? AND ar.work_date BETWEEN ? AND ?
+        `).all(targetStaffId, startDateStr, endDateStr);
+        
+        const leaveRequests = db.prepare(`
+            SELECT * FROM leave_requests
+            WHERE staff_id = ? AND status = 'approved' AND start_date BETWEEN ? AND ?
+        `).all(targetStaffId, startDateStr, endDateStr);
+        
+        const shiftKeyMap = {
+            '当': { code: 'tou', label: '当務' },
+            '日': { code: 'nik', label: '日勤' },
+            '明': { code: 'off', label: '明番' },
+            '休': { code: 'hol', label: '週休' },
+            '有': { code: 'paid', label: '年休' },
+            '特': { code: 'special', label: '特休' },
+            '公': { code: 'public', label: '公休' },
+            '張': { code: 'business', label: '出張' },
+            '病': { code: 'sick', label: '病休' }
+        };
+        
+        const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+        const ledger = [];
+        
+        let dutyCount = 0;
+        let dayworkCount = 0;
+        let annualLeaveDays = 0;
+        let specialLeaveDays = 0;
+        let absentDays = 0;
+        let totalScheduledHours = 0;
+        let totalActualHours = 0;
+        let totalOvertimeHours = 0;
+        
+        const { parseDate, getJapaneseHoliday, getHolidayType } = require('../utils/holidays');
+        const todayStr = getLocalDetails().dateStr;
+        
+        for (let d = 1; d <= lastDay; d++) {
+            const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            const dateObj = parseDate(dateStr);
+            const dayOfWeekIndex = dateObj.getDay();
+            const dayOfWeekLabel = weekdays[dayOfWeekIndex];
+            
+            // 祝日チェック
+            const holidayName = getJapaneseHoliday(dateObj);
+            const holidayType = getHolidayType(dateStr);
+            const isHoliday = (dayOfWeekIndex === 0 || dayOfWeekIndex === 6 || holidayType !== null);
+            
+            // スケジュールと打刻実績のマッチング
+            const schedule = schedules.find(s => s.work_date === dateStr);
+            const attendance = attendances.find(a => a.work_date === dateStr);
+            const leave = leaveRequests.find(l => l.start_date <= dateStr && l.end_date >= dateStr);
+            
+            let shiftCode = 'off';
+            let shiftLabel = '週休';
+            
+            if (schedule) {
+                const mapped = shiftKeyMap[schedule.shift_key];
+                if (mapped) {
+                    shiftCode = mapped.code;
+                    shiftLabel = mapped.label;
+                } else {
+                    shiftLabel = schedule.shift_key;
+                }
+            } else {
+                // デフォルト判定
+                if (staff.is_day_worker) {
+                    if (dayOfWeekIndex === 0 || dayOfWeekIndex === 6 || holidayType !== null) {
+                        shiftCode = 'hol';
+                        shiftLabel = '週休';
+                    } else {
+                        shiftCode = 'nik';
+                        shiftLabel = '日勤';
+                    }
+                } else {
+                    shiftCode = 'off';
+                    shiftLabel = '非番';
+                }
+            }
+            
+            // 休暇による上書き
+            let remark = '';
+            if (leave) {
+                if (leave.leave_type === 'annual') {
+                    shiftCode = 'paid';
+                    shiftLabel = '年休';
+                    remark = '年休取得';
+                } else if (leave.leave_type === 'special') {
+                    shiftCode = 'special';
+                    shiftLabel = '特休';
+                    remark = '特休取得';
+                } else if (leave.leave_type === 'sick') {
+                    shiftCode = 'sick';
+                    shiftLabel = '病休';
+                    remark = '病休取得';
+                } else if (leave.leave_type === 'compensatory') {
+                    shiftCode = 'compensatory';
+                    shiftLabel = '代休';
+                    remark = '代休取得';
+                }
+            } else if (shiftCode === 'paid') {
+                remark = '年休取得';
+            } else if (shiftCode === 'special') {
+                remark = '特休取得';
+            }
+            
+            if (holidayName) {
+                remark = remark ? `${remark} / ${holidayName}` : holidayName;
+            } else if (holidayType === 'ordinance') {
+                remark = remark ? `${remark} / 年末年始` : '年末年始休日';
+            }
+            
+            // 所定時間の計算
+            let scheduledHours = 0;
+            if (shiftCode === 'tou') {
+                scheduledHours = 15.5;
+                dutyCount += 1;
+            } else if (shiftCode === 'nik') {
+                scheduledHours = 7.75;
+                dayworkCount += 1;
+            }
+            
+            if (shiftCode === 'paid') {
+                annualLeaveDays += 1;
+            } else if (shiftCode === 'special') {
+                specialLeaveDays += 1;
+            }
+            
+            let clockIn = '';
+            let clockOut = '';
+            let actualHours = 0;
+            let overtimeHours = 0;
+            let status = 'absent';
+            
+            if (attendance) {
+                clockIn = attendance.actual_clock_in ? attendance.actual_clock_in.substring(11, 16) : '';
+                clockOut = attendance.actual_clock_out ? attendance.actual_clock_out.substring(11, 16) : '';
+                actualHours = attendance.actual_hours || 0;
+                overtimeHours = attendance.overtime_hours || 0;
+                status = attendance.status;
+            }
+            
+            // 欠勤（当直/日勤予定で、休暇でなく、打刻実績がなく、本日の日付より過去である場合）
+            const isPastDate = dateStr < todayStr;
+            if (isPastDate && (shiftCode === 'tou' || shiftCode === 'nik') && shiftCode !== 'paid' && shiftCode !== 'special' && (!attendance || attendance.status === 'absent')) {
+                absentDays += 1;
+                status = 'absent';
+            }
+            
+            totalScheduledHours += scheduledHours;
+            totalActualHours += actualHours;
+            totalOvertimeHours += overtimeHours;
+            
+            ledger.push({
+                date: dateStr,
+                day: d,
+                day_of_week: dayOfWeekLabel,
+                day_index: dayOfWeekIndex,
+                is_holiday: isHoliday,
+                holiday_name: holidayName || (holidayType === 'ordinance' ? '年末年始' : null),
+                scheduled_shift: shiftCode,
+                shift_label: shiftLabel,
+                clock_in: clockIn,
+                clock_out: clockOut,
+                scheduled_hours: scheduledHours,
+                actual_hours: actualHours,
+                overtime_hours: overtimeHours,
+                status: status,
+                remarks: remark
+            });
+        }
+        
+        // 承認状態の取得
+        const monthlyApproval = db.prepare(`
+            SELECT * FROM ledger_approvals 
+            WHERE year_month = ? AND staff_id = ?
+        `).get(`${y}-${String(m).padStart(2, '0')}`, targetStaffId);
+        
+        let approvalObj = { status: 'draft', submitted_by: null, submitted_at: null, approved_by: null, approved_at: null };
+        if (monthlyApproval) {
+            const submitter = monthlyApproval.submitted_by ? db.prepare('SELECT s.name FROM staff s WHERE s.id = ? AND s.is_active = 1').get(monthlyApproval.submitted_by) : null;
+            const approver = monthlyApproval.approved_by ? db.prepare('SELECT s.name FROM staff s WHERE s.id = ? AND s.is_active = 1').get(monthlyApproval.approved_by) : null;
+            
+            approvalObj = {
+                status: monthlyApproval.status,
+                submitted_by: monthlyApproval.submitted_by,
+                submitted_by_name: submitter ? submitter.name : null,
+                submitted_at: monthlyApproval.submitted_at,
+                approved_by: monthlyApproval.approved_by,
+                approved_by_name: approver ? approver.name : null,
+                approved_at: monthlyApproval.approved_at
+            };
+        }
+        
+        res.json({
+            staff: {
+                id: staff.id,
+                name: staff.name,
+                employee_number: staff.employee_number,
+                rank: staff.rank,
+                platoon: staff.platoon,
+                platoon_label: staff.platoon === '1bu' ? '1部 (A日)' : (staff.platoon === '2bu' ? '2部 (B日)' : (staff.platoon === '3bu' ? '3部 (C日)' : '日勤')),
+                station_name: staff.station_name,
+                department_name: staff.department_name
+            },
+            ledger,
+            summary: {
+                duty_count: dutyCount,
+                daywork_count: dayworkCount,
+                annual_leave_days: annualLeaveDays,
+                special_leave_days: specialLeaveDays,
+                absent_days: absentDays,
+                total_scheduled_hours: Math.round(totalScheduledHours * 100) / 100,
+                total_actual_hours: Math.round(totalActualHours * 100) / 100,
+                total_overtime_hours: Math.round(totalOvertimeHours * 100) / 100
+            },
+            approval: approvalObj
+        });
+        
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
+/**
+ * @route   POST /api/attendance/ledger/approve
+ * @desc    出勤簿の提出・確認・承認処理
+ */
+router.post('/ledger/approve', verifyToken, (req, res) => {
+    const { staff_id, year_month, action } = req.body; // action: 'submit' (提出), 'approve' (承認), 'reject' (却下)
+    
+    if (!staff_id || !year_month || !action) {
+        return res.status(400).json({ error: '職員ID、年月、アクションを指定してください。' });
+    }
+    
+    const targetStaffId = parseInt(staff_id, 10);
+    
+    // 権限チェック
+    if (action === 'submit' && targetStaffId !== req.user.id) {
+        return res.status(403).json({ error: '自身以外の出勤簿を提出することはできません。' });
+    }
+    
+    if ((action === 'approve' || action === 'reject') && req.user.role === 'staff') {
+        return res.status(403).json({ error: '出勤簿を承認または却下する権限がありません。' });
+    }
+    
+    try {
+        // 職員の存在チェック
+        const staff = db.prepare('SELECT * FROM staff WHERE id = ?').get(targetStaffId);
+        if (!staff) {
+            return res.status(404).json({ error: '対象の職員が見つかりません。' });
+        }
+        
+        // 署長(chief)は自署の職員のみ承認可能
+        if ((action === 'approve' || action === 'reject') && req.user.role === 'chief' && staff.station_id !== req.user.station_id) {
+            return res.status(403).json({ error: '管轄外の部署の職員の出勤簿を承認することはできません。' });
+        }
+        
+        // 既存の承認レコード取得
+        const existing = db.prepare('SELECT * FROM ledger_approvals WHERE year_month = ? AND staff_id = ?').get(year_month, targetStaffId);
+        
+        let status = 'draft';
+        let submitted_by = existing ? existing.submitted_by : null;
+        let submitted_at = existing ? existing.submitted_at : null;
+        let approved_by = existing ? existing.approved_by : null;
+        let approved_at = existing ? existing.approved_at : null;
+        
+        const nowStr = getLocalDetails().dateTimeStr;
+        
+        if (action === 'submit') {
+            status = 'submitted';
+            submitted_by = req.user.id;
+            submitted_at = nowStr;
+        } else if (action === 'approve') {
+            status = 'approved';
+            approved_by = req.user.id;
+            approved_at = nowStr;
+        } else if (action === 'reject') {
+            status = 'draft';
+            submitted_by = null;
+            submitted_at = null;
+            approved_by = null;
+            approved_at = null;
+        }
+        
+        db.prepare(`
+            INSERT OR REPLACE INTO ledger_approvals (
+                year_month, staff_id, status, submitted_by, submitted_at, approved_by, approved_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(year_month, targetStaffId, status, submitted_by, submitted_at, approved_by, approved_at);
+        
+        // 監査ログ
+        db.prepare('INSERT INTO audit_logs (staff_id, action, details) VALUES (?, ?, ?)')
+            .run(req.user.id, `ledger_${action}`, `出勤簿アクション: 年月=${year_month}, 対象職員ID=${targetStaffId}, 結果ステータス=${status}`);
+            
+        res.json({
+            success: true,
+            message: `出勤簿を${action === 'submit' ? '提出' : (action === 'approve' ? '承認' : '差し戻し')}しました。`,
+            status
+        });
+        
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
 module.exports = router;
+

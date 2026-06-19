@@ -233,6 +233,7 @@ const Portal = {
         let menuItems = [
             { id: 'dashboard', label: 'ダッシュボード', icon: 'layout-dashboard' },
             { id: 'schedule', label: '勤務スケジュール', icon: 'calendar-days' },
+            { id: 'ledger', label: '出勤簿出力', icon: 'clipboard-list' },
             { id: 'leave', label: '休暇申請', icon: 'file-text' }
         ];
         
@@ -327,6 +328,10 @@ const Portal = {
                 case 'schedule':
                     breadcrumb.textContent = '勤務スケジュール';
                     await Schedule.render(contentBody);
+                    break;
+                case 'ledger':
+                    breadcrumb.textContent = '出勤簿出力';
+                    await Ledger.render(contentBody);
                     break;
                 case 'leave':
                     breadcrumb.textContent = '休暇申請';
