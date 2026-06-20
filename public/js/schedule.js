@@ -3397,7 +3397,85 @@ function renderRosterTable() {
             trSum.appendChild(document.createElement('td')); // 特休用空セル
             trSum.appendChild(document.createElement('td')); // 年間年休用空セル
             tbody.appendChild(trSum);
-        });
+        // 2. 週休の数
+        const trHolidaySum = document.createElement('tr');
+        trHolidaySum.className = 'daily-staff-row-sub';
+        trHolidaySum.style.fontSize = '10px';
+        trHolidaySum.style.color = 'var(--text-secondary)';
+        trHolidaySum.style.backgroundColor = 'rgba(0,0,0,0.01)';
+        
+        const tdHolidayLabel = document.createElement('td');
+        tdHolidayLabel.className = 'name-column';
+        tdHolidayLabel.textContent = '週休の数';
+        tdHolidayLabel.style.paddingLeft = '20px';
+        trHolidaySum.appendChild(tdHolidayLabel);
+        
+        for (let d = 0; d < 28; d++) {
+            let count = 0;
+            platoonStaff.forEach(s => {
+                const key = `${state.activeCycle}_${s.id}`;
+                if (state.roster[key] && state.roster[key][d] === '週') {
+                    count++;
+                }
+            });
+            
+            const tdVal = document.createElement('td');
+            tdVal.textContent = count;
+            
+            // 週末・祝日背景
+            const date = new Date(activeStartDate);
+            date.setDate(activeStartDate.getDate() + d);
+            if (date.getDay() === 6) tdVal.classList.add('sat-day');
+            if (date.getDay() === 0 || getJapaneseHoliday(date)) tdVal.classList.add('sun-day');
+            
+            trHolidaySum.appendChild(tdVal);
+        }
+        trHolidaySum.appendChild(document.createElement('td'));
+        trHolidaySum.appendChild(document.createElement('td'));
+        trHolidaySum.appendChild(document.createElement('td'));
+        trHolidaySum.appendChild(document.createElement('td')); // 特休用空セル
+        trHolidaySum.appendChild(document.createElement('td')); // 年間年休用空セル
+        tbody.appendChild(trHolidaySum);
+
+        // 3. 年休の数 (管理)
+        const trAnnualSum = document.createElement('tr');
+        trAnnualSum.className = 'daily-staff-row-sub';
+        trAnnualSum.style.fontSize = '10px';
+        trAnnualSum.style.color = 'var(--text-secondary)';
+        trAnnualSum.style.backgroundColor = 'rgba(0,0,0,0.01)';
+        
+        const tdAnnualLabel = document.createElement('td');
+        tdAnnualLabel.className = 'name-column';
+        tdAnnualLabel.textContent = '年休の数（管理）';
+        tdAnnualLabel.style.paddingLeft = '20px';
+        trAnnualSum.appendChild(tdAnnualLabel);
+        
+        for (let d = 0; d < 28; d++) {
+            let count = 0;
+            platoonStaff.forEach(s => {
+                const key = `${state.activeCycle}_${s.id}`;
+                if (state.roster[key] && state.roster[key][d] === '有') {
+                    count++;
+                }
+            });
+            
+            const tdVal = document.createElement('td');
+            tdVal.textContent = count;
+            
+            // 週末・祝日背景
+            const date = new Date(activeStartDate);
+            date.setDate(activeStartDate.getDate() + d);
+            if (date.getDay() === 6) tdVal.classList.add('sat-day');
+            if (date.getDay() === 0 || getJapaneseHoliday(date)) tdVal.classList.add('sun-day');
+            
+            trAnnualSum.appendChild(tdVal);
+        }
+        trAnnualSum.appendChild(document.createElement('td'));
+        trAnnualSum.appendChild(document.createElement('td'));
+        trAnnualSum.appendChild(document.createElement('td'));
+        trAnnualSum.appendChild(document.createElement('td')); // 特休用空セル
+        trAnnualSum.appendChild(document.createElement('td')); // 年間年休用空セル
+        tbody.appendChild(trAnnualSum);
         
         table.appendChild(tbody);
         scrollContainer.appendChild(table);

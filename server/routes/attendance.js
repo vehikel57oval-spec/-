@@ -688,7 +688,7 @@ router.get('/ledger', verifyToken, (req, res) => {
     try {
         // 職員情報の取得
         const staff = db.prepare(`
-            SELECT s.id, s.name, s.employee_number, s.rank, s.platoon, s.is_day_worker, s.station_id,
+            SELECT s.id, s.name, s.employee_number, s.rank, s.platoon, s.is_day_worker, s.station_id, s.annual_leave_balance,
                    st.name as station_name, fd.name as department_name
             FROM staff s
             JOIN stations st ON s.station_id = st.id
@@ -746,6 +746,7 @@ router.get('/ledger', verifyToken, (req, res) => {
         let dayworkCount = 0;
         let annualLeaveDays = 0;
         let specialLeaveDays = 0;
+        let holidayCount = 0;
         let absentDays = 0;
         let totalScheduledHours = 0;
         let totalActualHours = 0;
@@ -843,6 +844,8 @@ router.get('/ledger', verifyToken, (req, res) => {
                 annualLeaveDays += 1;
             } else if (shiftCode === 'special') {
                 specialLeaveDays += 1;
+            } else if (shiftCode === 'hol') {
+                holidayCount += 1;
             }
             
             let clockIn = '';
@@ -920,7 +923,8 @@ router.get('/ledger', verifyToken, (req, res) => {
                 platoon: staff.platoon,
                 platoon_label: staff.platoon === '1bu' ? '1部 (A日)' : (staff.platoon === '2bu' ? '2部 (B日)' : (staff.platoon === '3bu' ? '3部 (C日)' : '日勤')),
                 station_name: staff.station_name,
-                department_name: staff.department_name
+                department_name: staff.department_name,
+                annual_leave_balance: staff.annual_leave_balance
             },
             ledger,
             summary: {
@@ -928,6 +932,7 @@ router.get('/ledger', verifyToken, (req, res) => {
                 daywork_count: dayworkCount,
                 annual_leave_days: annualLeaveDays,
                 special_leave_days: specialLeaveDays,
+                holiday_count: holidayCount,
                 absent_days: absentDays,
                 total_scheduled_hours: Math.round(totalScheduledHours * 100) / 100,
                 total_actual_hours: Math.round(totalActualHours * 100) / 100,

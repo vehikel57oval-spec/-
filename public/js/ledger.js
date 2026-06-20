@@ -324,8 +324,10 @@ const Ledger = {
                         <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px;">
                             <div>当務勤務回数: <strong>${summary.duty_count} 回</strong></div>
                             <div>日勤勤務日数: <strong>${summary.daywork_count} 日</strong></div>
+                            <div>週休取得日数: <strong>${summary.holiday_count || 0} 日</strong></div>
                             <div>有給(年休)消化: <strong>${summary.annual_leave_days.toFixed(1)} 日</strong></div>
                             <div>特別休暇消化: <strong>${summary.special_leave_days.toFixed(1)} 日</strong></div>
+                            <div>年休残日数(管理): <strong>${staff.annual_leave_balance !== undefined && staff.annual_leave_balance !== null ? staff.annual_leave_balance.toFixed(1) : '-'} 日</strong></div>
                             <div style="${summary.absent_days > 0 ? 'color:#dc2626; font-weight:600;' : ''}">欠勤日数: <strong>${summary.absent_days} 日</strong></div>
                             <div>総所定労働時間: <strong>${summary.total_scheduled_hours.toFixed(2)} h</strong></div>
                             <div>総実労働時間: <strong>${summary.total_actual_hours.toFixed(2)} h</strong></div>
