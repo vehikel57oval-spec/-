@@ -480,7 +480,8 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .roster-grid {
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
     border-collapse: collapse;
     text-align: center;
     font-size: 12px;

@@ -1207,7 +1207,7 @@ async function render(container) {
                             <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">※システム定義 of 基本シフト（当・非・週・休）は削除・名前変更できません。</p>
 
                             <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-                                <table class="roster-grid" style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                                <table class="roster-grid" style="width: max-content; min-width: 100%; font-size: 12px; border-collapse: collapse;">
                                     <thead>
                                         <tr>
                                             <th style="padding: 6px; font-size: 11px; text-align: left;">コード</th>
@@ -1315,7 +1315,7 @@ async function render(container) {
                     </div>
                     
                     <!-- 車両設定一覧テーブル -->
-                    <table class="roster-grid" style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                    <table class="roster-grid" style="width: max-content; min-width: 100%; font-size: 12px; border-collapse: collapse;">
                         <thead>
                             <tr>
                                 <th style="text-align: left; padding: 8px;">車両名</th>
@@ -1356,7 +1356,7 @@ async function render(container) {
                 </div>
                 
                 <div style="overflow-y: auto; flex: 1; min-height: 250px;">
-                    <table class="roster-grid" style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                    <table class="roster-grid" style="width: max-content; min-width: 100%; font-size: 12px; border-collapse: collapse;">
                         <thead>
                             <tr>
                                 <th style="text-align: left; padding: 4px 6px; width: 110px;">氏名</th>
