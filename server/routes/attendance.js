@@ -1,5 +1,34 @@
 const express = require('express');
 const router = express.Router();
+
+// 時間文字列(HH:MM)を分換算するヘルパー
+function parseTimeToMinutes(timeStr) {
+    if (!timeStr) return 0;
+    const parts = timeStr.split(':');
+    return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+}
+
+// 時間休の消化時間(時間)を計算するヘルパー
+function calculateHourlyLeaveHours(startTimeStr, endTimeStr, isDayWorker) {
+    if (!startTimeStr || !endTimeStr) return 0;
+    let startMin = parseTimeToMinutes(startTimeStr);
+    let endMin = parseTimeToMinutes(endTimeStr);
+    if (endMin < startMin) endMin += 24 * 60;
+    let diffMin = endMin - startMin;
+    let breakMin = 0;
+    for (let m = startMin; m < endMin; m++) {
+        let currentDayMin = m % (24 * 60);
+        if (isDayWorker) {
+            if (currentDayMin >= 720 && currentDayMin < 780) breakMin++;
+        } else {
+            if (currentDayMin >= 720 && currentDayMin < 780) breakMin++;
+            if (currentDayMin >= 1035 && currentDayMin < 1080) breakMin++;
+            if (currentDayMin >= 1320 || currentDayMin < 300) breakMin++;
+        }
+    }
+    return Math.max(0, (diffMin - breakMin) / 60);
+}
+
 const db = require('../db/database');
 const { verifyToken, requireRole } = require('../middleware/auth');
 const { roundTime } = require('../utils/timeRounding');
@@ -840,10 +869,21 @@ router.get('/ledger', verifyToken, (req, res) => {
                 dayworkCount += 1;
             }
             
-            if (shiftCode === 'paid') {
-                annualLeaveDays += 1;
-            } else if (shiftCode === 'special') {
-                specialLeaveDays += 1;
+            if (shiftCode === 'paid' || shiftCode === 'special') {
+                let consumedDays = 0;
+                // 時間休判定
+                if (schedule && schedule.start_time && schedule.end_time) {
+                    const hours = calculateHourlyLeaveHours(schedule.start_time, schedule.end_time, !!staff.is_day_worker);
+                    consumedDays = hours / 8.0;
+                } else {
+                    consumedDays = staff.is_day_worker ? 1.0 : 2.0;
+                }
+                
+                if (shiftCode === 'paid') {
+                    annualLeaveDays += consumedDays;
+                } else {
+                    specialLeaveDays += consumedDays;
+                }
             } else if (shiftCode === 'hol') {
                 holidayCount += 1;
             }
