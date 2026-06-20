@@ -2223,6 +2223,7 @@ function createTableHeader(thead, isRosterTable) {
     const thName1 = document.createElement('th');
     thName1.textContent = '氏名';
     thName1.rowSpan = 2;
+    thName1.classList.add('name-column');
     headerDays.appendChild(thName1);
     
     // アクティブサイクルの開始日を計算
@@ -2333,6 +2334,7 @@ function renderRosterTable() {
             
             // 氏名・資格列
             const tdName = document.createElement('td');
+            tdName.className = 'name-column';
             tdName.innerHTML = `
                 <div style="display: flex; flex-direction: column; gap: 2px; line-height: 1.2;">
                     <div style="font-weight: 600; font-size:12px;">
@@ -2452,6 +2454,7 @@ function renderRosterTable() {
         trTotal.className = 'daily-staff-row';
         
         const tdTotalLabel = document.createElement('td');
+        tdTotalLabel.className = 'name-column';
         tdTotalLabel.textContent = `出勤合計 (当番)`;
         trTotal.appendChild(tdTotalLabel);
         
@@ -2525,6 +2528,7 @@ function renderRosterTable() {
             trSum.style.backgroundColor = 'rgba(0,0,0,0.01)';
             
             const tdLabel = document.createElement('td');
+            tdLabel.className = 'name-column';
             tdLabel.textContent = spec.label;
             tdLabel.style.paddingLeft = '20px';
             trSum.appendChild(tdLabel);
@@ -2914,6 +2918,7 @@ function renderHopeTable() {
             const tr = document.createElement('tr');
             
             const tdName = document.createElement('td');
+            tdName.className = 'name-column';
             tdName.innerHTML = `
                 <div style="display: flex; flex-direction: column; gap: 2px; line-height: 1.2;">
                     <div style="font-weight: 600; font-size:12px;">

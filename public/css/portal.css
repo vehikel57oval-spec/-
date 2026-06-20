@@ -1544,7 +1544,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Sticky column for employee names */
-.roster-grid th:first-child, .roster-grid td:first-child {
+.roster-grid th.name-column, .roster-grid td.name-column {
     position: sticky;
     left: 0;
     z-index: 10;
@@ -1558,7 +1558,7 @@ h1, h2, h3, h4, h5, h6 {
     box-shadow: 2px 0 6px rgba(0,0,0,0.06);
 }
 
-[data-theme="dark"] .roster-grid td:first-child {
+[data-theme="dark"] .roster-grid td.name-column {
     background-color: #111827;
 }
 
