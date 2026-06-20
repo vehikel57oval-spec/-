@@ -2269,24 +2269,28 @@ function createTableHeader(thead, isRosterTable) {
         thDuty.textContent = '当番';
         thDuty.className = 'stats-header-col';
         thDuty.rowSpan = 2;
+        thDuty.title = '当番出勤日数';
         headerDays.appendChild(thDuty);
         
         const thHoliday = document.createElement('th');
         thHoliday.textContent = '週休';
         thHoliday.className = 'stats-header-col';
         thHoliday.rowSpan = 2;
+        thHoliday.title = '週休日数（8日が基準）';
         headerDays.appendChild(thHoliday);
         
         const thAnnual = document.createElement('th');
         thAnnual.textContent = '年休';
         thAnnual.className = 'stats-header-col';
         thAnnual.rowSpan = 2;
+        thAnnual.title = '年次有給休暇取得数（当番単位）';
         headerDays.appendChild(thAnnual);
 
         const thSpecial = document.createElement('th');
         thSpecial.textContent = '特休';
         thSpecial.className = 'stats-header-col';
         thSpecial.rowSpan = 2;
+        thSpecial.title = '特別休暇取得数';
         headerDays.appendChild(thSpecial);
     }
 }
@@ -2303,7 +2307,9 @@ function renderRosterTable() {
         // セクションタイトル
         const sectionTitle = document.createElement('div');
         sectionTitle.className = 'platoon-section-title';
-        sectionTitle.textContent = `第 ${platoonNum} 小隊`;
+        // A日/B日 対応ラベル
+        const platoonLabel = platoonNum === 1 ? 'A日 (第1小隊)' : 'B日 (第2小隊)';
+        sectionTitle.innerHTML = `${platoonLabel} <span style="font-size:12px;font-weight:500;color:var(--text-secondary);margin-left:6px;">${state.staffList.filter(s=>s.platoon===platoonNum).length} 名</span>`;
         container.appendChild(sectionTitle);
         
         // テーブルスクロールコンテナ
@@ -2434,6 +2440,11 @@ function renderRosterTable() {
             tr.appendChild(tdSpecialStat);
             
             tbody.appendChild(tr);
+            // 縞模様（偶数行に淡い背景）
+            const rowIndex = platoonStaff.indexOf(staff);
+            if (rowIndex % 2 === 1) {
+                tr.style.backgroundColor = 'rgba(0,0,0,0.018)';
+            }
         });
         
         // 1. 小隊全体の出勤合計
