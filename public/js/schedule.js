@@ -3397,6 +3397,7 @@ function renderRosterTable() {
             trSum.appendChild(document.createElement('td')); // 特休用空セル
             trSum.appendChild(document.createElement('td')); // 年間年休用空セル
             tbody.appendChild(trSum);
+        });
         // 2. 週休の数
         const trHolidaySum = document.createElement('tr');
         trHolidaySum.className = 'daily-staff-row-sub';
