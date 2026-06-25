@@ -17,7 +17,8 @@ let dbData = {
     vehicle_assignments: [],
     schedule_staff_overrides: [],
     holiday_allowance_ledgers: [],
-    ledger_approvals: []
+    ledger_approvals: [],
+    schedule_drafts: []
 };
 
 // シードデータ（初期データ）
@@ -157,6 +158,10 @@ function migrateData() {
     let modified = false;
     if (!dbData.ledger_approvals) {
         dbData.ledger_approvals = [];
+        modified = true;
+    }
+    if (!dbData.schedule_drafts) {
+        dbData.schedule_drafts = [];
         modified = true;
     }
     if (dbData.staff && Array.isArray(dbData.staff)) {
@@ -452,6 +457,13 @@ class Statement {
             return dbData.ledger_approvals.find(x => x.year_month === params[0] && parseInt(x.staff_id, 10) === staffId);
         }
 
+        // 22. 特定の下書きロード用
+        if (sql === "SELECT * FROM schedule_drafts WHERE id = ?") {
+            if (!dbData.schedule_drafts) dbData.schedule_drafts = [];
+            const id = parseInt(params[0], 10);
+            return dbData.schedule_drafts.find(x => x.id === id);
+        }
+
         // 21. schedule_staff_overrides 起算日の単一取得
         if (sql === "SELECT start_date FROM schedule_staff_overrides LIMIT 1") {
             if (!dbData.schedule_staff_overrides) dbData.schedule_staff_overrides = [];
@@ -695,6 +707,35 @@ class Statement {
                 result = result.filter(x => x.leave_type === 'weekly_off');
             }
             return result;
+        }
+
+        // 22. 下書き履歴一覧の取得
+        if (sql.includes("SELECT id, station_id, cycle_number, start_date, draft_name, created_at, created_by_name FROM schedule_drafts")) {
+            if (!dbData.schedule_drafts) dbData.schedule_drafts = [];
+            const station_id = parseInt(params[0], 10);
+            const start_date = params[1];
+            const cycle_number = parseInt(params[2], 10);
+            
+            let list = dbData.schedule_drafts.filter(x => 
+                x.station_id === station_id && 
+                x.start_date === start_date && 
+                x.cycle_number === cycle_number
+            );
+            
+            // メタデータのみ抽出
+            const mappedList = list.map(x => ({
+                id: x.id,
+                station_id: x.station_id,
+                cycle_number: x.cycle_number,
+                start_date: x.start_date,
+                draft_name: x.draft_name,
+                created_at: x.created_at,
+                created_by_name: x.created_by_name
+            }));
+            
+            // ソート（作成日時の降順＝新しいものが上）
+            mappedList.sort((a, b) => b.created_at.localeCompare(a.created_at));
+            return mappedList;
         }
 
         console.warn('[DB MOCK UNHANDLED ALL] Returning empty array. SQL:', sql);
@@ -1393,6 +1434,53 @@ class Statement {
                     created_at: new Date().toISOString()
                 });
             }
+            lastInsertRowid = id;
+            changes = 1;
+        }
+
+        // 下書き削除
+        else if (sql.includes("DELETE FROM schedule_drafts")) {
+            if (!dbData.schedule_drafts) dbData.schedule_drafts = [];
+            if (sql.includes("WHERE id = ?")) {
+                const id = parseInt(params[0], 10);
+                const beforeLen = dbData.schedule_drafts.length;
+                dbData.schedule_drafts = dbData.schedule_drafts.filter(x => x.id !== id);
+                changes = beforeLen - dbData.schedule_drafts.length;
+            }
+        }
+
+        // 下書き保存 (INSERT)
+        else if (sql.includes("INSERT INTO schedule_drafts")) {
+            if (!dbData.schedule_drafts) dbData.schedule_drafts = [];
+            const id = dbData.schedule_drafts.length + 1;
+            
+            const station_id = parseInt(params[0], 10);
+            const cycle_number = parseInt(params[1], 10);
+            const start_date = params[2];
+            const draft_name = params[3];
+            const created_at = params[4];
+            const created_by = parseInt(params[5], 10);
+            const created_by_name = params[6];
+            const roster_data = typeof params[7] === 'string' ? JSON.parse(params[7]) : params[7];
+            const vehicle_data = typeof params[8] === 'string' ? JSON.parse(params[8]) : params[8];
+            const hourly_leaves = typeof params[9] === 'string' ? JSON.parse(params[9]) : params[9];
+            const staff_list = typeof params[10] === 'string' ? JSON.parse(params[10]) : params[10];
+            
+            dbData.schedule_drafts.push({
+                id,
+                station_id,
+                cycle_number,
+                start_date,
+                draft_name,
+                created_at,
+                created_by,
+                created_by_name,
+                roster_data,
+                vehicle_data,
+                hourly_leaves,
+                staff_list
+            });
+            
             lastInsertRowid = id;
             changes = 1;
         }

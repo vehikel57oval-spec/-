@@ -741,4 +741,159 @@ router.post('/confirm', verifyToken, requireRole('admin', 'sysadmin', 'chief'), 
     }
 });
 
+
+/**
+ * @route   POST /api/schedule/drafts
+ * @desc    下書き履歴への名前付き保存
+ */
+router.post('/drafts', verifyToken, requireRole('admin', 'sysadmin', 'chief'), (req, res) => {
+    const { station_id, start_date, cycle_number, draft_name, roster, deployedVehicles, vehicleAssignments, hourlyLeaves, staffList } = req.body;
+
+    if (!station_id || !start_date || !cycle_number || !roster) {
+        return res.status(400).json({ error: '必要なパラメータが不足しています。' });
+    }
+
+    try {
+        const name = draft_name ? draft_name.trim() : `下書き (${new Date().toLocaleString('ja-JP')})`;
+        const createdAt = new Date().toISOString();
+        const createdBy = req.user.id;
+        const createdByName = req.user.name || '管理者';
+
+        // 稼働車両と車両配置を1つのオブジェクトにパッケージングする
+        const vehicleData = {
+            deployedVehicles: deployedVehicles || [],
+            vehicleAssignments: vehicleAssignments || {}
+        };
+
+        const result = db.prepare(`
+            INSERT INTO schedule_drafts (
+                station_id, cycle_number, start_date, draft_name, created_at, created_by, created_by_name,
+                roster_data, vehicle_data, hourly_leaves, staff_list
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            parseInt(station_id, 10),
+            parseInt(cycle_number, 10),
+            start_date,
+            name,
+            createdAt,
+            createdBy,
+            createdByName,
+            JSON.stringify(roster),
+            JSON.stringify(vehicleData),
+            JSON.stringify(hourlyLeaves || {}),
+            JSON.stringify(staffList || [])
+        );
+
+        // ログ記録
+        db.prepare('INSERT INTO audit_logs (staff_id, action, details) VALUES (?, ?, ?)')
+            .run(req.user.id, 'save_schedule_draft', `名前付き下書き保存: 名前="${name}", ID=${result.lastInsertRowid}`);
+
+        res.json({ success: true, message: `下書き「${name}」を保存しました。`, id: result.lastInsertRowid });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: '下書きの保存に失敗しました。' });
+    }
+});
+
+/**
+ * @route   GET /api/schedule/drafts
+ * @desc    指定条件に合致する下書き履歴一覧（メタデータのみ）の取得
+ */
+router.get('/drafts', verifyToken, requireRole('admin', 'sysadmin', 'chief'), (req, res) => {
+    const stationId = parseInt(req.query.station_id, 10);
+    const startDate = req.query.start_date;
+    const cycleNumber = parseInt(req.query.cycle_number, 10);
+
+    if (!stationId || !startDate || !cycleNumber) {
+        return res.status(400).json({ error: '必要なパラメータが不足しています。' });
+    }
+
+    try {
+        const drafts = db.prepare(`
+            SELECT id, station_id, cycle_number, start_date, draft_name, created_at, created_by_name
+            FROM schedule_drafts
+            WHERE station_id = ? AND start_date = ? AND cycle_number = ?
+        `).all(stationId, startDate, cycleNumber);
+
+        res.json({ success: true, drafts });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: '下書き履歴一覧の取得に失敗しました。' });
+    }
+});
+
+/**
+ * @route   GET /api/schedule/drafts/:id
+ * @desc    特定の下書きの詳細データ取得
+ */
+router.get('/drafts/:id', verifyToken, requireRole('admin', 'sysadmin', 'chief'), (req, res) => {
+    const draftId = parseInt(req.params.id, 10);
+
+    if (isNaN(draftId)) {
+        return res.status(400).json({ error: '無効な下書きIDです。' });
+    }
+
+    try {
+        const draft = db.prepare('SELECT * FROM schedule_drafts WHERE id = ?').get(draftId);
+
+        if (!draft) {
+            return res.status(404).json({ error: '指定された下書きが見つかりません。' });
+        }
+
+        const vehicleData = typeof draft.vehicle_data === 'string' ? JSON.parse(draft.vehicle_data) : draft.vehicle_data;
+
+        res.json({
+            success: true,
+            draft: {
+                id: draft.id,
+                station_id: draft.station_id,
+                cycle_number: draft.cycle_number,
+                start_date: draft.start_date,
+                draft_name: draft.draft_name,
+                created_at: draft.created_at,
+                created_by_name: draft.created_by_name,
+                roster: typeof draft.roster_data === 'string' ? JSON.parse(draft.roster_data) : draft.roster_data,
+                deployedVehicles: (vehicleData && vehicleData.deployedVehicles) || [],
+                vehicleAssignments: (vehicleData && vehicleData.vehicleAssignments) || {},
+                hourlyLeaves: typeof draft.hourly_leaves === 'string' ? JSON.parse(draft.hourly_leaves) : draft.hourly_leaves,
+                staffList: typeof draft.staff_list === 'string' ? JSON.parse(draft.staff_list) : draft.staff_list
+            }
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: '下書きデータの取得に失敗しました。' });
+    }
+});
+
+/**
+ * @route   DELETE /api/schedule/drafts/:id
+ * @desc    下書きの削除
+ */
+router.delete('/drafts/:id', verifyToken, requireRole('admin', 'sysadmin', 'chief'), (req, res) => {
+    const draftId = parseInt(req.params.id, 10);
+
+    if (isNaN(draftId)) {
+        return res.status(400).json({ error: '無効な下書きIDです。' });
+    }
+
+    try {
+        const existing = db.prepare('SELECT id, draft_name FROM schedule_drafts WHERE id = ?').get(draftId);
+        if (!existing) {
+            return res.status(404).json({ error: '指定された下書きが見つかりません。' });
+        }
+
+        db.prepare('DELETE FROM schedule_drafts WHERE id = ?').run(draftId);
+
+        // ログ記録
+        db.prepare('INSERT INTO audit_logs (staff_id, action, details) VALUES (?, ?, ?)')
+            .run(req.user.id, 'delete_schedule_draft', `下書き削除: 名前="${existing.draft_name}", ID=${draftId}`);
+
+        res.json({ success: true, message: '下書きを削除しました。' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: '下書きの削除に失敗しました。' });
+    }
+});
+
 module.exports = router;
+

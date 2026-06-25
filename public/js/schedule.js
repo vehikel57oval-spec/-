@@ -849,6 +849,235 @@ async function saveDraft() {
     }
 }
 
+// 名前付き下書き保存APIの呼び出し
+async function saveDraftWithName(draftName) {
+    const currentRoster = {};
+    state.staffList.forEach(s => {
+        const k = `${state.activeCycle}_${s.id}`;
+        if (state.roster[k]) {
+            currentRoster[s.id] = state.roster[k];
+        }
+    });
+
+    const payload = {
+        station_id: state.stationId,
+        start_date: state.startDate,
+        cycle_number: state.activeCycle,
+        draft_name: draftName,
+        roster: currentRoster,
+        deployedVehicles: state.deployedVehicles,
+        vehicleAssignments: state.vehicleAssignments,
+        hourlyLeaves: state.hourlyLeaves,
+        staffList: state.staffList
+    };
+
+    try {
+        const response = await fetch('/api/schedule/drafts', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${Auth.token}`
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+            // 一時保存用データも自動更新して同期
+            saveDraft();
+            Portal.showToast(data.message, 'success');
+        } else {
+            Portal.showToast(data.error, 'error');
+        }
+    } catch (err) {
+        console.error('Save draft error:', err);
+        Portal.showToast('通信エラーが発生しました。', 'error');
+    }
+}
+
+// 下書き履歴モーダルを開く
+async function openDraftHistoryModal() {
+    const modal = document.getElementById('modal-draft-history');
+    if (!modal) return;
+
+    const tbody = document.getElementById('draft-history-table-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-secondary);">読み込み中...</td></tr>';
+    modal.style.display = 'flex';
+
+    try {
+        const url = `/api/schedule/drafts?station_id=${state.stationId}&start_date=${state.startDate}&cycle_number=${state.activeCycle}`;
+        const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${Auth.token}` }
+        });
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || '下書き一覧の取得に失敗しました。');
+        }
+
+        tbody.innerHTML = '';
+        if (!data.drafts || data.drafts.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-secondary);">保存された下書きはありません。</td></tr>';
+            return;
+        }
+
+        data.drafts.forEach(draft => {
+            const tr = document.createElement('tr');
+            
+            // 下書き名
+            const tdName = document.createElement('td');
+            tdName.style.padding = '8px 12px';
+            tdName.style.border = '1px solid var(--border-color)';
+            tdName.style.textAlign = 'left';
+            tdName.style.fontWeight = '500';
+            tdName.textContent = draft.draft_name;
+            tr.appendChild(tdName);
+
+            // 保存日時
+            const tdTime = document.createElement('td');
+            tdTime.style.padding = '8px 4px';
+            tdTime.style.border = '1px solid var(--border-color)';
+            tdTime.textContent = new Date(draft.created_at).toLocaleString('ja-JP');
+            tr.appendChild(tdTime);
+
+            // 保存者
+            const tdUser = document.createElement('td');
+            tdUser.style.padding = '8px 4px';
+            tdUser.style.border = '1px solid var(--border-color)';
+            tdUser.textContent = draft.created_by_name;
+            tr.appendChild(tdUser);
+
+            // 操作
+            const tdAction = document.createElement('td');
+            tdAction.style.padding = '8px 4px';
+            tdAction.style.border = '1px solid var(--border-color)';
+            tdAction.style.display = 'flex';
+            tdAction.style.justifyContent = 'center';
+            tdAction.style.gap = '8px';
+
+            const btnLoad = document.createElement('button');
+            btnLoad.className = 'btn btn-primary';
+            btnLoad.style.padding = '4px 10px';
+            btnLoad.style.fontSize = '11px';
+            btnLoad.textContent = '適用';
+            btnLoad.addEventListener('click', () => {
+                loadDraftData(draft.id);
+            });
+
+            const btnDelete = document.createElement('button');
+            btnDelete.className = 'btn btn-secondary';
+            btnDelete.style.padding = '4px 10px';
+            btnDelete.style.fontSize = '11px';
+            btnDelete.style.color = 'var(--color-wday-sun)';
+            btnDelete.style.borderColor = 'var(--border-color)';
+            btnDelete.textContent = '削除';
+            btnDelete.addEventListener('click', () => {
+                deleteDraftData(draft.id, tr);
+            });
+
+            tdAction.appendChild(btnLoad);
+            tdAction.appendChild(btnDelete);
+            tr.appendChild(tdAction);
+
+            tbody.appendChild(tr);
+        });
+
+    } catch (err) {
+        console.error(err);
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--color-wday-sun);">エラー: ${err.message}</td></tr>`;
+    }
+}
+
+// モーダルを閉じる
+function closeDraftHistoryModal() {
+    const modal = document.getElementById('modal-draft-history');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// 特定の下書きをロードして適用
+async function loadDraftData(draftId) {
+    const confirmed = await showCustomConfirm('選択した下書きを読み込みますか？\n現在編集中の内容は上書きされます。');
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch(`/api/schedule/drafts/${draftId}`, {
+            headers: { 'Authorization': `Bearer ${Auth.token}` }
+        });
+        const data = await response.json();
+
+        if (!response.ok || !data.success || !data.draft) {
+            throw new Error(data.error || '下書きデータの取得に失敗しました。');
+        }
+
+        const draft = data.draft;
+
+        // データの適用
+        state.staffList = (draft.staffList || []).map(s => {
+            s.isRescue = ["救助隊", "救助副", "救助隊長", "小隊長", "主幹"].includes(s.position);
+            return s;
+        });
+        state.deployedVehicles = draft.deployedVehicles || [];
+        state.vehicleAssignments = draft.vehicleAssignments || {};
+        state.hourlyLeaves = draft.hourlyLeaves || {};
+        
+        // rosterのマッピング
+        state.roster = {};
+        if (draft.roster) {
+            state.staffList.forEach(s => {
+                const key = `${state.activeCycle}_${s.id}`;
+                if (draft.roster[s.id]) {
+                    state.roster[key] = draft.roster[s.id];
+                } else {
+                    state.roster[key] = new Array(28).fill('-');
+                }
+            });
+        }
+
+        // 画面の更新
+        closeDraftHistoryModal();
+        refreshUI();
+        syncDeployedVehiclesCheckboxes();
+        Portal.showToast(`下書き「${draft.draft_name}」を正常に適用しました。`, 'success');
+
+    } catch (err) {
+        console.error(err);
+        await showCustomAlert(`下書きの適用に失敗しました: ${err.message}`);
+    }
+}
+
+// 下書きの削除
+async function deleteDraftData(draftId, rowElement) {
+    const confirmed = await showCustomConfirm('この下書きを削除してもよろしいですか？');
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch(`/api/schedule/drafts/${draftId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${Auth.token}` }
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+            rowElement.remove();
+            Portal.showToast(data.message, 'success');
+            
+            // 下書きが一件もなくなったかチェック
+            const tbody = document.getElementById('draft-history-table-body');
+            if (tbody && tbody.children.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-secondary);">保存された下書きはありません。</td></tr>';
+            }
+        } else {
+            Portal.showToast(data.error, 'error');
+        }
+    } catch (err) {
+        console.error(err);
+        Portal.showToast('通信エラーが発生しました。', 'error');
+    }
+}
+
 // 勤務表確定APIの呼び出し
 async function confirmSchedule() {
     const confirmed = await showCustomConfirm('このサイクルの勤務表を確定しますか？\n確定すると、各職員の出退勤予定レコードが自動的に生成されます。');
@@ -916,6 +1145,7 @@ async function render(container) {
             </div>
             <div style="display:flex; gap:12px; align-items:center;">
                 <button id="btn-toggle-settings" class="btn btn-secondary" style="font-size:13px; padding:6px 16px;">⚙️ 設定非表示</button>
+                <button id="btn-history-drafts" class="btn btn-secondary admin-only" style="font-size:13px; padding:6px 16px;">📂 下書き履歴</button>
                 <button id="btn-save-draft" class="btn btn-secondary admin-only" style="font-size:13px; padding:6px 16px;">下書き保存</button>
                 <button id="btn-confirm-schedule" class="btn btn-primary admin-only" style="font-size:13px; padding:6px 16px;">勤務表を確定</button>
             </div>
@@ -1434,6 +1664,42 @@ async function render(container) {
     `;
     document.body.appendChild(priorModalDiv.firstElementChild);
 
+    // 下書き履歴用モーダルの動的追加
+    document.getElementById('modal-draft-history')?.remove();
+    const draftModalDiv = document.createElement('div');
+    draftModalDiv.innerHTML = `
+        <div id="modal-draft-history" class="modal no-print" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 9999;">
+            <div class="modal-content" style="background: var(--bg-card); padding: 24px; border-radius: var(--radius-lg); border: 1px solid var(--border-color); max-width: 800px; width: 95%; max-height: 85%; display: flex; flex-direction: column; gap: 16px; box-shadow: var(--shadow-lg);">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                    <h4 style="margin: 0; font-size: 16px; font-weight: 600;">📂 下書き履歴一覧</h4>
+                    <button id="btn-draft-modal-x" style="background: transparent; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); line-height: 1;">&times;</button>
+                </div>
+                <p style="margin: 0; font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
+                   保存された下書きの一覧です。「適用」をクリックすると現在の勤務表・車両配置に反映されます。（現在編集中の内容は上書きされます）
+                </p>
+                <div style="overflow-y: auto; flex: 1; min-height: 250px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+                    <table class="roster-grid" style="width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed;">
+                        <thead>
+                            <tr style="background-color: var(--secondary-bg); position: sticky; top: 0; z-index: 10;">
+                                <th style="text-align: left; padding: 8px 12px; width: 200px;">下書き名</th>
+                                <th style="width: 140px; padding: 8px 4px; text-align: center;">保存日時</th>
+                                <th style="width: 100px; padding: 8px 4px; text-align: center;">保存者</th>
+                                <th style="width: 140px; padding: 8px 4px; text-align: center;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="draft-history-table-body">
+                            <!-- 動的生成 -->
+                        </tbody>
+                    </table>
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 8px;">
+                    <button id="btn-draft-modal-close" class="btn btn-secondary" style="padding: 8px 20px; font-size: 13px;">閉じる</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(draftModalDiv.firstElementChild);
+
     // 設定初期化
     initSettings();
     loadVehicleSpecs();
@@ -1678,8 +1944,8 @@ function getYearlyAnnualLeaveCounts(targetYear) {
         const underscoreIdx = key.indexOf('_');
         if (underscoreIdx === -1) return;
         const cycleNum = parseInt(key.slice(0, underscoreIdx));
-        const staffId = parseInt(key.slice(underscoreIdx + 1));
-        if (isNaN(cycleNum) || isNaN(staffId)) return;
+        const staffId = key.slice(underscoreIdx + 1); // 文字列IDとして扱うため parseInt を削除
+        if (isNaN(cycleNum)) return;
 
         // そのサイクルの開始日が対象年（暦年）に含まれるか確認
         const cycleStart = new Date(state.startDate);
@@ -1687,7 +1953,21 @@ function getYearlyAnnualLeaveCounts(targetYear) {
         if (cycleStart.getFullYear() !== targetYear) return;
 
         const schedule = state.roster[key] || [];
-        const annualCount = schedule.filter(s => s === '有').length;
+        const staff = state.staffList.find(s => s.id === staffId);
+        if (!staff) return;
+
+        let annualCount = 0;
+        for (let d = 0; d < schedule.length; d++) {
+            if (schedule[d] === '有') {
+                const hourlyKey = `${cycleNum}_${staffId}_${d}`;
+                if (state.hourlyLeaves && state.hourlyLeaves[hourlyKey]) {
+                    annualCount += state.hourlyLeaves[hourlyKey].hours / 8.0;
+                } else {
+                    annualCount += staff.isDayWorker ? 1.0 : 2.0;
+                }
+            }
+        }
+
         if (counts[staffId] !== undefined) {
             counts[staffId] += annualCount;
         }
@@ -1849,63 +2129,76 @@ function adjustSurplusLeaves(cycleNum, platoonNum) {
     // 次サイクルで年間累積が少ない分だけ自動的に優先される。
     // ================================================================
     const localYearlyCounts = { ...yearlyCounts }; // ループ内での更新用ローカルコピー
-    let workingRoster = JSON.parse(JSON.stringify(state.roster));
+    const cycleAssignedCounts = {};
+    state.staffList.forEach(s => { cycleAssignedCounts[s.id] = 0; });
 
-    let madeChange = true;
+    let workingRoster = JSON.parse(JSON.stringify(state.roster));
     let totalAssigned = 0;
 
-    while (madeChange) {
-        madeChange = false;
+    // 段階的キャップ (まずは全員1日を目指し、段階的に上限を引き上げていく)
+    for (let limit = 1; limit <= 5; limit++) {
+        let madeChangeInLimit = true;
 
-        // 現在の余剰人員を再計算
-        const daySurplus = getDaySurplus(workingRoster);
+        while (madeChangeInLimit) {
+            madeChangeInLimit = false;
 
-        // 全候補ペア（職員×日）を収集
-        const allCandidates = [];
+            // 現在の余剰人員を再計算
+            const daySurplus = getDaySurplus(workingRoster);
 
-        targetStaff.forEach(staff => {
-            const currentYearly = localYearlyCounts[staff.id] || 0;
-            if (currentYearly >= YEARLY_TARGET) return; // 年間上限到達はスキップ
+            // 全候補ペア（職員×日）を収集
+            const allCandidates = [];
 
-            for (let d = 0; d < 28; d++) {
-                if (daySurplus[d] <= 0) continue;
-                if (isHolidayOrNewYear(d)) continue;
-                if (!canTakeLeave(workingRoster, staff, d)) continue;
+            targetStaff.forEach(staff => {
+                const currentYearly = localYearlyCounts[staff.id] || 0;
+                if (currentYearly >= YEARLY_TARGET) return; // 年間上限到達はスキップ
 
-                const hasConsec = hasConsecutiveLeave(workingRoster, staff, d);
-                allCandidates.push({
-                    staff,
-                    day: d,
-                    yearlyCount: currentYearly,
-                    surplus: daySurplus[d],
-                    hasConsec // 連休フラグ（ソフト制約）
-                });
-            }
-        });
+                const currentCycleAssigned = cycleAssignedCounts[staff.id] || 0;
+                if (currentCycleAssigned >= limit) return; // 今回の限界値に達している場合はスキップ
 
-        if (allCandidates.length === 0) break;
+                for (let d = 0; d < 28; d++) {
+                    if (daySurplus[d] <= 0) continue;
+                    if (isHolidayOrNewYear(d)) continue;
+                    if (!canTakeLeave(workingRoster, staff, d)) continue;
 
-        // 優先順位:
-        // 1. 連休にならない日を優先（ソフト制約）
-        // 2. 年間累積が少ない職員を優先（均等化）
-        // 3. 余剰人員が多い日を優先（安全性）
-        const nonConsec = allCandidates.filter(c => !c.hasConsec);
-        const pool = nonConsec.length > 0 ? nonConsec : allCandidates;
+                    const hasConsec = hasConsecutiveLeave(workingRoster, staff, d);
+                    allCandidates.push({
+                        staff,
+                        day: d,
+                        yearlyCount: currentYearly,
+                        cycleAssigned: currentCycleAssigned,
+                        surplus: daySurplus[d],
+                        hasConsec // 連休フラグ（ソフト制約）
+                    });
+                }
+            });
 
-        pool.sort((a, b) => {
-            if (a.yearlyCount !== b.yearlyCount) return a.yearlyCount - b.yearlyCount;
-            if (a.surplus !== b.surplus) return b.surplus - a.surplus;
-            return Math.random() - 0.5; // タイブレーク
-        });
+            if (allCandidates.length === 0) break;
 
-        // 最優先候補を割り当て
-        const best = pool[0];
-        const key = `${cycleNum}_${best.staff.id}`;
-        workingRoster[key][best.day] = '有';
-        localYearlyCounts[best.staff.id] = (localYearlyCounts[best.staff.id] || 0) + 1;
-        totalAssigned++;
-        madeChange = true;
-        console.log(`Assigned '有' to ${best.staff.name} on Day ${best.day + 1} (yearly total: ${localYearlyCounts[best.staff.id]}, consecutive: ${best.hasConsec})`);
+            // 優先順位:
+            // 1. 連休にならない日を優先（ソフト制約）
+            // 2. このサイクルでの割当数が少ない職員を優先（均等化）
+            // 3. 年間累積が少ない職員を優先（均等化）
+            // 4. 余剰人員が多い日を優先（安全性）
+            const nonConsec = allCandidates.filter(c => !c.hasConsec);
+            const pool = nonConsec.length > 0 ? nonConsec : allCandidates;
+
+            pool.sort((a, b) => {
+                if (a.cycleAssigned !== b.cycleAssigned) return a.cycleAssigned - b.cycleAssigned;
+                if (a.yearlyCount !== b.yearlyCount) return a.yearlyCount - b.yearlyCount;
+                if (a.surplus !== b.surplus) return b.surplus - a.surplus;
+                return Math.random() - 0.5; // タイブレーク
+            });
+
+            // 最優先候補を割り当て
+            const best = pool[0];
+            const key = `${cycleNum}_${best.staff.id}`;
+            workingRoster[key][best.day] = '有';
+            localYearlyCounts[best.staff.id] = (localYearlyCounts[best.staff.id] || 0) + (best.staff.isDayWorker ? 1.0 : 2.0);
+            cycleAssignedCounts[best.staff.id] = (cycleAssignedCounts[best.staff.id] || 0) + 1;
+            totalAssigned++;
+            madeChangeInLimit = true;
+            console.log(`Assigned '有' to ${best.staff.name} on Day ${best.day + 1} (cycle count: ${cycleAssignedCounts[best.staff.id]}, yearly total: ${localYearlyCounts[best.staff.id]}, limit: ${limit}, consecutive: ${best.hasConsec})`);
+        }
     }
 
     console.log(`Total annual leaves assigned: ${totalAssigned}`);
@@ -2507,6 +2800,27 @@ function bindEvents() {
         });
     }
 
+    // 設定パネル表示/非表示切り替え
+    const elBtnToggleSettings = document.getElementById('btn-toggle-settings');
+    if (elBtnToggleSettings) {
+        // 初期状態の反映
+        const isCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
+        if (isCollapsed) {
+            const container = document.querySelector('.app-container');
+            if (container) container.classList.add('sidebar-collapsed');
+            elBtnToggleSettings.textContent = '⚙️ 設定表示';
+        }
+        
+        elBtnToggleSettings.addEventListener('click', () => {
+            const container = document.querySelector('.app-container');
+            if (container) {
+                const collapsed = container.classList.toggle('sidebar-collapsed');
+                localStorage.setItem('sidebar-collapsed', collapsed ? 'true' : 'false');
+                elBtnToggleSettings.textContent = collapsed ? '⚙️ 設定表示' : '⚙️ 設定非表示';
+            }
+        });
+    }
+
     // サイクル変更
     document.getElementById('select-cycle').addEventListener('change', async (e) => {
         state.activeCycle = parseInt(e.target.value);
@@ -2736,9 +3050,27 @@ function bindEvents() {
     // 下書き保存 (データベースへの保存)
     const elBtnSaveDraft = document.getElementById('btn-save-draft');
     if (elBtnSaveDraft) {
-        elBtnSaveDraft.addEventListener('click', () => {
-            saveDraft();
+        elBtnSaveDraft.addEventListener('click', async () => {
+            const defaultName = `下書き (${new Date().toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })})`;
+            const name = await showCustomPrompt("下書きの名称を入力してください:", defaultName);
+            if (name === null) return; // キャンセル時
+            const finalName = name.trim() || defaultName;
+            saveDraftWithName(finalName);
         });
+    }
+
+    // 下書き履歴の呼び出し
+    const elBtnHistoryDrafts = document.getElementById('btn-history-drafts');
+    if (elBtnHistoryDrafts) {
+        elBtnHistoryDrafts.addEventListener('click', openDraftHistoryModal);
+    }
+    const elBtnDraftX = document.getElementById('btn-draft-modal-x');
+    if (elBtnDraftX) {
+        elBtnDraftX.addEventListener('click', closeDraftHistoryModal);
+    }
+    const elBtnDraftClose = document.getElementById('btn-draft-modal-close');
+    if (elBtnDraftClose) {
+        elBtnDraftClose.addEventListener('click', closeDraftHistoryModal);
     }
 
     // 勤務表の確定
@@ -5241,24 +5573,7 @@ function renderVehicleView() {
         }
     });
 
-    // 設定パネル表示/非表示切り替え
-    const elBtnToggleSettings = document.getElementById('btn-toggle-settings');
-    if (elBtnToggleSettings) {
-        // 初期状態の反映
-        const isCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
-        if (isCollapsed) {
-            const container = document.querySelector('.app-container');
-            if (container) container.classList.add('sidebar-collapsed');
-            elBtnToggleSettings.textContent = '⚙️ 設定表示';
-        }
-        
-        elBtnToggleSettings.addEventListener('click', () => {
-            const container = document.querySelector('.app-container');
-            const collapsed = container.classList.toggle('sidebar-collapsed');
-            localStorage.setItem('sidebar-collapsed', collapsed ? 'true' : 'false');
-            elBtnToggleSettings.textContent = collapsed ? '⚙️ 設定表示' : '⚙️ 設定非表示';
-        });
-    }
+
 
     // 移行期モーダル関連のイベントバインド
     const elBtnOpenPrior = document.getElementById('btn-open-prior-roster');
