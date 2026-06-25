@@ -64,6 +64,9 @@
             <h1>隔日勤務 2交代 勤務表自動生成</h1>
         </div>
         <div class="header-controls">
+            <button id="btn-toggle-settings" class="btn btn-secondary" title="設定パネル表示/非表示" style="display: flex; align-items: center; gap: 4px;">
+                <span>⚙️ 設定非表示</span>
+            </button>
             <button id="btn-theme-toggle" class="btn btn-icon" title="テーマ切り替え" aria-label="テーマ切り替え">
                 <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
                 <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -115,6 +118,10 @@
                     <label for="input-min-paramedic">最低確保 救命士数</label>
                     <input type="number" id="input-min-paramedic" class="form-control" min="0" max="50" value="1">
                 </div>
+                <div class="form-group no-print">
+                    <label for="input-min-rescue">最低確保 救助隊員数</label>
+                    <input type="number" id="input-min-rescue" class="form-control" min="0" max="50" placeholder="指定なし">
+                </div>
                 <div class="form-group">
                     <label for="select-cycle">表示サイクル</label>
                     <select id="select-cycle" class="form-control">
@@ -148,6 +155,9 @@
                     <span class="info-label">対象期間 (28日間):</span>
                     <span id="label-cycle-range" class="info-value">-</span>
                 </div>
+                <button id="btn-open-prior-roster" class="btn btn-secondary btn-block no-print" style="margin-top: 12px; font-size: 12px; padding: 8px; font-weight: 600;">
+                    <span>📊 前月最終週の勤務入力</span>
+                </button>
             </section>
 
 
@@ -598,6 +608,43 @@
             
             <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 8px;">
                 <button id="btn-member-modal-close" class="btn btn-primary" style="padding: 8px 20px; font-size: 13px;">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 移行期（前月最終週）の勤務実績入力用モーダル -->
+    <div id="modal-prior-roster" class="modal no-print" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 9999;">
+        <div class="modal-content" style="background: var(--bg-card); padding: 24px; border-radius: var(--radius-lg); border: 1px solid var(--border-color); max-width: 800px; width: 95%; max-height: 85%; display: flex; flex-direction: column; gap: 16px; box-shadow: var(--shadow-lg);">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                <h4 style="margin: 0; font-size: 16px; font-weight: 600;">📊 移行期（前月最終週）の勤務実績入力</h4>
+                <button id="btn-prior-modal-x" style="background: transparent; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); line-height: 1;">&times;</button>
+            </div>
+            <p style="margin: 0; font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
+                起算日（開始日）の直近7日間における各メンバーの勤務状況を手入力してください。ここで設定した当番・非番・週休は、自動生成時の「連勤回数の上限（最長3日）」などの計算に反映されます。空欄の場合は通常の交代パターンで引き継がれます。
+            </p>
+            <div style="overflow-y: auto; flex: 1; min-height: 250px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+                <table class="roster-grid" style="width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed;">
+                    <thead>
+                        <tr style="background-color: var(--secondary-bg); position: sticky; top: 0; z-index: 10;">
+                            <th style="text-align: left; padding: 8px 12px; width: 140px; position: sticky; left: 0; background-color: var(--secondary-bg); z-index: 11;">名前</th>
+                            <th style="width: 60px; padding: 8px 4px; text-align: center;">小隊</th>
+                            <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                            <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                            <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                            <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                            <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                            <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                            <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                        </tr>
+                    </thead>
+                    <tbody id="prior-roster-table-body">
+                        <!-- JavaScriptで動的生成 -->
+                    </tbody>
+                </table>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 8px;">
+                <button id="btn-prior-modal-cancel" class="btn btn-secondary" style="padding: 8px 20px; font-size: 13px;">キャンセル</button>
+                <button id="btn-prior-modal-save" class="btn btn-primary" style="padding: 8px 20px; font-size: 13px;">設定を保存・適用</button>
             </div>
         </div>
     </div>

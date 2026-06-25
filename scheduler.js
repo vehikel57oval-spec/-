@@ -72,7 +72,7 @@ function isSupportStaffWorkingOnBlock(s, k, startDate) {
     return dayStr >= s.supportStart && dayStr <= s.supportEnd;
 }
 
-function solvePlatoon(candidates, minH, maxH, platoonStaff, supportStaff = [], startDate = null, minSubOfficer = 1, minLarge = 1, minParamedic = 1) {
+function solvePlatoon(candidates, minH, maxH, platoonStaff, supportStaff = [], startDate = null, minSubOfficer = 1, minLarge = 1, minParamedic = 1, minRescue = null) {
     const n = candidates.length;
     const assignment = new Array(n);
     const hCounts = new Array(14).fill(0);
@@ -116,7 +116,7 @@ function solvePlatoon(candidates, minH, maxH, platoonStaff, supportStaff = [], s
     const targetSubOfficers = Math.min(minSubOfficer, totalSubOfficers);
     const targetLarge = Math.min(minLarge, totalLarge);
     const targetParamedics = Math.min(minParamedic, totalParamedics);
-    const targetRescue = Math.min(2, totalRescue);
+    const targetRescue = (minRescue !== null && minRescue !== undefined && !isNaN(minRescue)) ? Math.min(minRescue, totalRescue) : 0;
     
     // 競合評価関数 (ペナルティスコア)
     function getScore() {
@@ -162,7 +162,7 @@ function solvePlatoon(candidates, minH, maxH, platoonStaff, supportStaff = [], s
             if (officers < targetOfficers) softScore += (targetOfficers - officers) * 5;
             if (large < targetLarge) softScore += (targetLarge - large) * 5;
             if (paramedics < targetParamedics) softScore += (targetParamedics - paramedics) * 5;
-            if (rescue < targetRescue) softScore += (targetRescue - rescue) * 5;
+            if ((minRescue !== null && minRescue !== undefined && !isNaN(minRescue)) && rescue < targetRescue) softScore += (targetRescue - rescue) * 5;
         }
         return { hard: hardScore, soft: softScore, total: hardScore + softScore };
     }
@@ -258,7 +258,7 @@ function solvePlatoon(candidates, minH, maxH, platoonStaff, supportStaff = [], s
  * @param {Object} hopeShifts 希望休情報 (staffId -> dayIndex -> '休')
  * @param {number} minStaffing 最低確保人員
  */
-function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11, minSubOfficer = 1, minLarge = 1, minParamedic = 1) {
+function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11, minSubOfficer = 1, minLarge = 1, minParamedic = 1, minRescue = null) {
     // 応援職員と正規職員を分離
     const regularStaff = staffList.filter(s => !s.isSupport);
     const supportStaff = staffList.filter(s => s.isSupport);
@@ -449,8 +449,8 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11, minS
 
     for (let p = 0; p < profiles.length; p++) {
         const { minH, maxH } = profiles[p];
-        sol1 = solvePlatoon(candidates1, minH, maxH, platoon1, support1, startDate, minSubOfficer, minLarge, minParamedic);
-        sol2 = solvePlatoon(candidates2, minH, maxH, platoon2, support2, startDate, minSubOfficer, minLarge, minParamedic);
+        sol1 = solvePlatoon(candidates1, minH, maxH, platoon1, support1, startDate, minSubOfficer, minLarge, minParamedic, minRescue);
+        sol2 = solvePlatoon(candidates2, minH, maxH, platoon2, support2, startDate, minSubOfficer, minLarge, minParamedic, minRescue);
         
         if (sol1 && sol2) {
             usedProfileIndex = p;
@@ -557,7 +557,19 @@ function generateRoster(startDate, staffList, hopeShifts, minStaffing = 11, minS
  * @param {number} minStaffing 最低確保人員
  * @returns {Array} 警告オブジェクトの配列
  */
-function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, minSubOfficer = 1, minLarge = 1, minParamedic = 1, startDate = null) {
+function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, minSubOfficer = 1, minLarge = 1, minParamedic = 1, startDate = null, minRescue = null) {
+    // 勤務表が作成される前（まだ週休などの割り当てが行われていない初期状態）は警告を出さない
+    let hasAnyOffDuty = false;
+    for (let staffId in roster) {
+        if (roster[staffId].some(shift => ['休', '有', '公', '特', '病', '張'].includes(shift))) {
+            hasAnyOffDuty = true;
+            break;
+        }
+    }
+    if (!hasAnyOffDuty) {
+        return [];
+    }
+
     const warnings = [];
     const staffMap = {};
     staffList.forEach(s => { staffMap[s.id] = s; });
@@ -592,6 +604,13 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, 
         if (!staff) continue;
         if (staff.isSupport) continue; // 応援職員は個人制約チェックをスキップ
 
+        // 継続的な不在（出張、病休、研修など）のチェック
+        const isAbsent = schedule.some(shift => {
+            if (!shift) return false;
+            if (['張', '病', '特'].includes(shift)) return true;
+            return /[張病特研学校学派]/.test(shift);
+        });
+
         let dutyCount = 0;
         let holidayCount = 0;
         
@@ -612,8 +631,8 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, 
             }
         }
 
-        // 8週休（計8日）のチェック
-        if (holidayCount !== 8) {
+        // 8週休（計8日）のチェック（出張・病休・研修などの不在期間がある場合は除く）
+        if (!isAbsent && holidayCount !== 8) {
             warnings.push({
                 type: 'holiday_count',
                 staffId: staffId,
@@ -684,7 +703,8 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, 
             }
         }
 
-        if (maxConsecutiveWorkBlocks > 3) {
+        // 連勤チェック（出張・病休・研修などの不在期間がある場合は除く）
+        if (!isAbsent && maxConsecutiveWorkBlocks > 3) {
             warnings.push({
                 type: 'max_consecutive_shifts',
                 staffId: staffId,
@@ -735,7 +755,7 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, 
         const targetOfficers = getPlatoonOfficerTarget(activePlatoonNum);
         const targetLarge = getPlatoonTarget(activePlatoonNum, 'hasLargeLicense', minLarge);
         const targetParamedics = getPlatoonTarget(activePlatoonNum, 'isParamedic', minParamedic);
-        const targetRescue = getPlatoonTarget(activePlatoonNum, 'isRescue', 2);
+        const targetRescue = (minRescue !== null && minRescue !== undefined && !isNaN(minRescue)) ? getPlatoonTarget(activePlatoonNum, 'isRescue', minRescue) : 0;
         
         if (subOfficersOnDuty < targetSubOfficers) {
             warnings.push({
@@ -765,7 +785,7 @@ function validateRoster(roster, staffList, minStaffing = 11, prevRoster = null, 
                 message: `${d + 1}日目：当番（第${activePlatoonNum}小隊）の救命士が ${paramedicsOnDuty} 名です。${targetParamedics}名必要です。`
             });
         }
-        if (rescueOnDuty < targetRescue) {
+        if (minRescue !== null && minRescue !== undefined && !isNaN(minRescue) && rescueOnDuty < targetRescue) {
             warnings.push({
                 type: 'balance_rescue',
                 dayIndex: d,
@@ -855,7 +875,7 @@ function exportToCSV(roster, startDate, staffList, hourlyLeaves = {}, activeCycl
  * @param {Array} staffList スタッフ情報リスト
  * @param {number} minStaffing 最低確保人員
  */
-function insertAnnualLeaves(roster, staffList, minStaffing = 11, minSubOfficer = 1, minLarge = 1, minParamedic = 1) {
+function insertAnnualLeaves(roster, staffList, minStaffing = 11, minSubOfficer = 1, minLarge = 1, minParamedic = 1, minRescue = null) {
     const staffMap = {};
     staffList.forEach(s => { staffMap[s.id] = s; });
 
@@ -904,7 +924,7 @@ function insertAnnualLeaves(roster, staffList, minStaffing = 11, minSubOfficer =
         const targetSubOfficers = getPlatoonSubOfficerTarget(activePlatoonNum, minSubOfficer);
         const targetLarge = getPlatoonTarget(activePlatoonNum, 'hasLargeLicense');
         const targetParamedics = getPlatoonTarget(activePlatoonNum, 'isParamedic');
-        const targetRescue = getPlatoonTarget(activePlatoonNum, 'isRescue');
+        const targetRescue = (minRescue !== null && minRescue !== undefined && !isNaN(minRescue)) ? getPlatoonTarget(activePlatoonNum, 'isRescue', minRescue) : 0;
 
         // 余剰があるか？（出勤人数 > 最低確保人員）
         let currentDutyCount = dutyStaffIds.length;
@@ -936,7 +956,7 @@ function insertAnnualLeaves(roster, staffList, minStaffing = 11, minSubOfficer =
                 const isSubOfficerSafe = tempSubOfficers >= targetSubOfficers;
                 const isLargeSafe = tempLarge >= targetLarge;
                 const isParamedicSafe = tempParamedics >= targetParamedics;
-                const isRescueSafe = tempRescue >= targetRescue;
+                const isRescueSafe = (minRescue === null || minRescue === undefined || isNaN(minRescue)) || tempRescue >= targetRescue;
 
                 if (isOfficerSafe && isSubOfficerSafe && isLargeSafe && isParamedicSafe && isRescueSafe) {
                     candidates.push(staffId);

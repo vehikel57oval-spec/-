@@ -28,9 +28,11 @@ const state = {
     minSubOfficer: 1,
     minLarge: 1,
     minParamedic: 1,
+    minRescue: null,
     vehicleAssignments: {},
     deployedVehicles: [],
-    isConfirmed: false
+    isConfirmed: false,
+    priorRoster: {} // staffId -> array of 7 prior shifts
 };
 
 const DEFAULT_VEHICLE_SPECS = [
@@ -912,7 +914,8 @@ async function render(container) {
                 </svg>
                 勤務スケジュール管理 (隔日勤務 2交代)
             </div>
-            <div style="display:flex; gap:12px;">
+            <div style="display:flex; gap:12px; align-items:center;">
+                <button id="btn-toggle-settings" class="btn btn-secondary" style="font-size:13px; padding:6px 16px;">⚙️ 設定非表示</button>
                 <button id="btn-save-draft" class="btn btn-secondary admin-only" style="font-size:13px; padding:6px 16px;">下書き保存</button>
                 <button id="btn-confirm-schedule" class="btn btn-primary admin-only" style="font-size:13px; padding:6px 16px;">勤務表を確定</button>
             </div>
@@ -920,7 +923,7 @@ async function render(container) {
         
         <main class="app-container" style="margin-top:0; padding:0; display:flex; gap:20px; width:100%;">
             <!-- 設定パネル (サイドバー) -->
-            <aside class="settings-sidebar no-print" style="flex: 0 0 330px; width: 330px; display:flex; flex-direction:column; gap:16px;">
+            <aside class="settings-sidebar no-print" style="flex: 0 0 280px; width: 280px; display:flex; flex-direction:column; gap:16px;">
                 <section class="card settings-card" style="padding: 16px; display:flex; flex-direction:column; gap:12px; margin-bottom: 0;">
                     <h2 style="font-size:14px; border-bottom:1px solid var(--border-color); padding-bottom:6px; margin-bottom:0;">1. 基本設定</h2>
                     <div class="form-group">
@@ -940,6 +943,9 @@ async function render(container) {
                             ${[...Array(13)].map((_, i) => `<option value="${i+1}">第 ${i+1} サイクル</option>`).join('')}
                         </select>
                     </div>
+                    <button id="btn-open-prior-roster" class="btn btn-secondary btn-block admin-only" style="margin-top: 4px; font-size: 11px; padding: 6px 12px; font-weight: 600; width: 100%; display: flex; justify-content: center; align-items: center; gap: 6px; margin-bottom: 8px;">
+                        <span>📊 前月最終週の勤務入力</span>
+                    </button>
                     <div class="form-group admin-only">
                         <label class="form-label" style="font-size:11px; margin-bottom:4px;">小隊定員数</label>
                         <input type="number" class="form-control" id="input-platoon-size" min="1" max="40" style="font-size:12px; padding:4px 8px; height:28px;">
@@ -959,6 +965,10 @@ async function render(container) {
                     <div class="form-group admin-only">
                         <label class="form-label" style="font-size:11px; margin-bottom:4px;">最低確保 救命士数</label>
                         <input type="number" class="form-control" id="input-min-paramedic" min="0" max="10" style="font-size:12px; padding:4px 8px; height:28px;">
+                    </div>
+                    <div class="form-group admin-only">
+                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">最低確保 救助隊員数</label>
+                        <input type="number" class="form-control" id="input-min-rescue" min="0" max="10" placeholder="指定なし" style="font-size:12px; padding:4px 8px; height:28px;">
                     </div>
                     <div class="form-group admin-only" style="display: flex; align-items: center; gap: 8px; margin-top:4px; margin-bottom:0;">
                         <input type="checkbox" id="chk-auto-leave" style="width: 16px; height: 16px; cursor: pointer;">
@@ -1382,6 +1392,48 @@ async function render(container) {
     `;
     document.body.appendChild(memberModalDiv.firstElementChild);
 
+    // 移行期（前月最終週）の勤務実績入力用モーダルの動的追加
+    document.getElementById('modal-prior-roster')?.remove();
+    const priorModalDiv = document.createElement('div');
+    priorModalDiv.innerHTML = `
+        <div id="modal-prior-roster" class="modal no-print" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 9999;">
+            <div class="modal-content" style="background: var(--bg-card); padding: 24px; border-radius: var(--radius-lg); border: 1px solid var(--border-color); max-width: 800px; width: 95%; max-height: 85%; display: flex; flex-direction: column; gap: 16px; box-shadow: var(--shadow-lg);">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                    <h4 style="margin: 0; font-size: 16px; font-weight: 600;">📊 移行期（前月最終週）の勤務実績入力</h4>
+                    <button id="btn-prior-modal-x" style="background: transparent; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); line-height: 1;">&times;</button>
+                </div>
+                <p style="margin: 0; font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
+                    起算日（開始日）の直近7日間における各メンバーの勤務状況を手入力してください。ここで設定した当番・非番・週休は、自動生成時の「連勤回数の上限（最長3日）」などの計算に反映されます。空欄の場合は通常の交代パターンで引き継がれます。
+                </p>
+                <div style="overflow-y: auto; flex: 1; min-height: 250px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+                    <table class="roster-grid" style="width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed;">
+                        <thead>
+                            <tr style="background-color: var(--secondary-bg); position: sticky; top: 0; z-index: 10;">
+                                <th style="text-align: left; padding: 8px 12px; width: 140px; position: sticky; left: 0; background-color: var(--secondary-bg); z-index: 11;">名前</th>
+                                <th style="width: 60px; padding: 8px 4px; text-align: center;">小隊</th>
+                                <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                                <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                                <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                                <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                                <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                                <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                                <th class="prior-date-header" style="width: 60px; padding: 8px 4px; text-align: center;">-</th>
+                            </tr>
+                        </thead>
+                        <tbody id="prior-roster-table-body">
+                            <!-- JavaScriptで動的生成 -->
+                        </tbody>
+                    </table>
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 8px;">
+                    <button id="btn-prior-modal-cancel" class="btn btn-secondary" style="padding: 8px 20px; font-size: 13px;">キャンセル</button>
+                    <button id="btn-prior-modal-save" class="btn btn-primary" style="padding: 8px 20px; font-size: 13px;">設定を保存・適用</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(priorModalDiv.firstElementChild);
+
     // 設定初期化
     initSettings();
     loadVehicleSpecs();
@@ -1743,6 +1795,12 @@ function adjustSurplusLeaves(cycleNum, platoonNum) {
         const currentParaCount = onDuty.filter(s => s.isParamedic).length;
         if (paraCount < minPara && paraCount < currentParaCount) return false;
 
+        if (state.minRescue !== null && state.minRescue !== undefined && !isNaN(state.minRescue)) {
+            const rescueCount = remaining.filter(s => s.isRescue).length;
+            const currentRescueCount = onDuty.filter(s => s.isRescue).length;
+            if (rescueCount < state.minRescue && rescueCount < currentRescueCount) return false;
+        }
+
         return true;
     }
 
@@ -2085,6 +2143,7 @@ async function handleDateChange(skipFetch = false) {
         }
     }
     updateGenerateButtonText();
+    loadPriorRoster();
     
     refreshUI();
 }
@@ -2303,6 +2362,21 @@ function bindEvents() {
         refreshUI();
     });
     
+    // 最低確保 救助隊員数の変更
+    document.getElementById('input-min-rescue').addEventListener('change', (e) => {
+        let val = parseInt(e.target.value);
+        if (e.target.value === '' || isNaN(val)) {
+            state.minRescue = null;
+            e.target.value = '';
+        } else {
+            if (val < 0) val = 0;
+            if (val > 50) val = 50;
+            e.target.value = val;
+            state.minRescue = val;
+        }
+        refreshUI();
+    });
+    
     // 部分的自動生成の基準日変更時の文言更新
     const regenSelectElement = document.getElementById('select-regen-start-day');
     if (regenSelectElement) {
@@ -2509,6 +2583,27 @@ function bindEvents() {
                                 }
                             }
                         }
+                    } else if (state.priorRoster && state.priorRoster[s.id]) {
+                        const prior = state.priorRoster[s.id];
+                        if (s.platoon === 1) {
+                            const checkIndices = [5, 3, 1];
+                            for (let idx of checkIndices) {
+                                if (prior[idx] === '当') {
+                                    prevConsecutive++;
+                                } else {
+                                    break;
+                                }
+                            }
+                        } else {
+                            const checkIndices = [6, 4, 2, 0];
+                            for (let idx of checkIndices) {
+                                if (prior[idx] === '当') {
+                                    prevConsecutive++;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
                     }
                     return {
                         ...s,
@@ -2516,7 +2611,7 @@ function bindEvents() {
                     };
                 });
 
-                const res = generateRoster(activeStartDate, staffListWithPrev, activeHopeShifts, state.minStaffing, state.minSubOfficer, state.minLarge, state.minParamedic);
+                const res = generateRoster(activeStartDate, staffListWithPrev, activeHopeShifts, state.minStaffing, state.minSubOfficer, state.minLarge, state.minParamedic, state.minRescue);
                 if (res.success) {
                     // 生成結果をアクティブサイクルに格納
                     state.staffList.forEach(s => {
@@ -2609,6 +2704,7 @@ function bindEvents() {
                 minSubOfficer: state.minSubOfficer,
                 minLarge: state.minLarge,
                 minParamedic: state.minParamedic,
+                minRescue: state.minRescue,
                 staffList: state.staffList,
                 hopeShifts: state.hopeShifts,
                 roster: state.roster,
@@ -2728,6 +2824,10 @@ function bindEvents() {
                     state.minParamedic = data.minParamedic !== undefined ? data.minParamedic : 1;
                     const elInputMinParamedic = document.getElementById('input-min-paramedic');
                     if (elInputMinParamedic) elInputMinParamedic.value = state.minParamedic;
+                    
+                    state.minRescue = data.minRescue !== undefined ? data.minRescue : null;
+                    const elInputMinRescue = document.getElementById('input-min-rescue');
+                    if (elInputMinRescue) elInputMinRescue.value = state.minRescue !== null ? state.minRescue : '';
                     
                     state.hourlyLeaves = data.hourlyLeaves || {};
                     
@@ -2924,6 +3024,7 @@ function refreshUI() {
     setDisabled('input-min-subofficer', !isAdmin);
     setDisabled('input-min-large', !isAdmin);
     setDisabled('input-min-paramedic', !isAdmin);
+    setDisabled('input-min-rescue', !isAdmin);
     setDisabled('select-regen-start-day', !isAdmin);
     const chkAutoLeave = document.getElementById('chk-auto-leave');
     if (chkAutoLeave) chkAutoLeave.disabled = !isAdmin;
@@ -2945,11 +3046,30 @@ function refreshUI() {
             const key = `${state.activeCycle - 1}_${s.id}`;
             prevRoster[s.id] = state.roster[key] || new Array(28).fill('-');
         });
+    } else if (state.priorRoster) {
+        prevRoster = {};
+        state.staffList.forEach(s => {
+            const prior = state.priorRoster[s.id];
+            if (prior) {
+                const dummySched = new Array(28).fill('-');
+                if (s.platoon === 1) {
+                    dummySched[26] = prior[5] || '-';
+                    dummySched[24] = prior[3] || '-';
+                    dummySched[22] = prior[1] || '-';
+                } else {
+                    dummySched[27] = prior[6] || '-';
+                    dummySched[25] = prior[4] || '-';
+                    dummySched[23] = prior[2] || '-';
+                    dummySched[21] = prior[0] || '-';
+                }
+                prevRoster[s.id] = dummySched;
+            }
+        });
     }
 
     const activeStartDate = new Date(state.startDate);
     activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
-    state.warnings = validateRoster(activeRoster, state.staffList, state.minStaffing, prevRoster, state.minSubOfficer, state.minLarge, state.minParamedic, activeStartDate);
+    state.warnings = validateRoster(activeRoster, state.staffList, state.minStaffing, prevRoster, state.minSubOfficer, state.minLarge, state.minParamedic, activeStartDate, state.minRescue);
     renderWarnings();
     
     // アクティブなタブに合わせて描画
@@ -5120,6 +5240,43 @@ function renderVehicleView() {
             warningsDiv.style.display = 'none';
         }
     });
+
+    // 設定パネル表示/非表示切り替え
+    const elBtnToggleSettings = document.getElementById('btn-toggle-settings');
+    if (elBtnToggleSettings) {
+        // 初期状態の反映
+        const isCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
+        if (isCollapsed) {
+            const container = document.querySelector('.app-container');
+            if (container) container.classList.add('sidebar-collapsed');
+            elBtnToggleSettings.textContent = '⚙️ 設定表示';
+        }
+        
+        elBtnToggleSettings.addEventListener('click', () => {
+            const container = document.querySelector('.app-container');
+            const collapsed = container.classList.toggle('sidebar-collapsed');
+            localStorage.setItem('sidebar-collapsed', collapsed ? 'true' : 'false');
+            elBtnToggleSettings.textContent = collapsed ? '⚙️ 設定表示' : '⚙️ 設定非表示';
+        });
+    }
+
+    // 移行期モーダル関連のイベントバインド
+    const elBtnOpenPrior = document.getElementById('btn-open-prior-roster');
+    if (elBtnOpenPrior) {
+        elBtnOpenPrior.addEventListener('click', openPriorRosterModal);
+    }
+    const elBtnPriorX = document.getElementById('btn-prior-modal-x');
+    if (elBtnPriorX) {
+        elBtnPriorX.addEventListener('click', closePriorRosterModal);
+    }
+    const elBtnPriorCancel = document.getElementById('btn-prior-modal-cancel');
+    if (elBtnPriorCancel) {
+        elBtnPriorCancel.addEventListener('click', closePriorRosterModal);
+    }
+    const elBtnPriorSave = document.getElementById('btn-prior-modal-save');
+    if (elBtnPriorSave) {
+        elBtnPriorSave.addEventListener('click', savePriorRosterFromModal);
+    }
 }
 
 // 車両配置イベントのバインド
@@ -5557,6 +5714,167 @@ function syncDeployedVehiclesCheckboxes() {
 // 運用車両チェックボックスの変更イベントを監視する (動的に生成されるためイベントリスナー側で処理済み)
 function bindVehicleCheckboxEvents() {
     // 互換性のために定義のみ残します
+}
+
+// 移行期（前月最終週）の勤務実績データの保存・読込
+function loadPriorRoster() {
+    const dateStr = state.startDate ? state.startDate : '';
+    const key = `fire_dept_prior_roster_${state.station}_${dateStr}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+        try {
+            state.priorRoster = JSON.parse(saved);
+        } catch (e) {
+            console.error('Failed to parse prior roster:', e);
+            state.priorRoster = {};
+        }
+    } else {
+        state.priorRoster = {};
+    }
+}
+
+function savePriorRoster() {
+    const dateStr = state.startDate ? state.startDate : '';
+    const key = `fire_dept_prior_roster_${state.station}_${dateStr}`;
+    localStorage.setItem(key, JSON.stringify(state.priorRoster));
+}
+
+function openPriorRosterModal() {
+    const modal = document.getElementById('modal-prior-roster');
+    if (!modal) return;
+    
+    const activeStartDate = new Date(state.startDate);
+    activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
+    
+    // 直前7日間の日付を計算
+    const priorDates = [];
+    const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+    for (let i = 7; i >= 1; i--) {
+        const d = new Date(activeStartDate);
+        d.setDate(activeStartDate.getDate() - i);
+        priorDates.push(d);
+    }
+    
+    // ヘッダーの日付表示を更新
+    const headers = modal.querySelectorAll('.prior-date-header');
+    priorDates.forEach((date, idx) => {
+        if (headers[idx]) {
+            headers[idx].textContent = `${date.getMonth() + 1}/${date.getDate()}(${WEEKDAYS[date.getDay()]})`;
+        }
+    });
+    
+    // テーブル行の動的生成
+    const tbody = document.getElementById('prior-roster-table-body');
+    if (tbody) {
+        tbody.innerHTML = '';
+        
+        // 正規職員のみ対象
+        const regularStaff = state.staffList.filter(s => !s.isSupport);
+        
+        regularStaff.forEach(staff => {
+            const tr = document.createElement('tr');
+            
+            // 名前
+            const tdName = document.createElement('td');
+            tdName.style.padding = '8px 12px';
+            tdName.style.border = '1px solid var(--border-color)';
+            tdName.style.textAlign = 'left';
+            tdName.style.position = 'sticky';
+            tdName.style.left = '0';
+            tdName.style.backgroundColor = 'var(--bg-card)';
+            tdName.textContent = staff.name;
+            tr.appendChild(tdName);
+            
+            // 小隊
+            const tdPlatoon = document.createElement('td');
+            tdPlatoon.style.padding = '8px 4px';
+            tdPlatoon.style.border = '1px solid var(--border-color)';
+            tdPlatoon.textContent = `${staff.platoon}小隊`;
+            tr.appendChild(tdPlatoon);
+            
+            // 7日間のセレクトボックス
+            const savedVals = state.priorRoster[staff.id] || [];
+            for (let idx = 0; idx < 7; idx++) {
+                const tdSelect = document.createElement('td');
+                tdSelect.style.padding = '4px';
+                tdSelect.style.border = '1px solid var(--border-color)';
+                
+                const select = document.createElement('select');
+                select.className = 'form-control';
+                select.style.padding = '2px 4px';
+                select.style.fontSize = '12px';
+                select.style.height = '24px';
+                select.style.width = '100%';
+                select.setAttribute('data-staff-id', staff.id);
+                select.setAttribute('data-day-idx', idx);
+                
+                const shiftsOptions = [
+                    { value: "", text: "通常交代" },
+                    { value: "当", text: "当番" },
+                    { value: "明", text: "非番" },
+                    { value: "週", text: "週休" },
+                    { value: "休", text: "休日" },
+                    { value: "有", text: "年休" },
+                    { value: "公", text: "公休" },
+                    { value: "張", text: "出張" },
+                    { value: "病", text: "病休" }
+                ];
+                
+                shiftsOptions.forEach(opt => {
+                    const elOpt = document.createElement('option');
+                    elOpt.value = opt.value;
+                    elOpt.textContent = opt.text;
+                    if (savedVals[idx] === opt.value) {
+                        elOpt.selected = true;
+                    }
+                    select.appendChild(elOpt);
+                });
+                
+                tdSelect.appendChild(select);
+                tr.appendChild(tdSelect);
+            }
+            tbody.appendChild(tr);
+        });
+    }
+    
+    modal.style.display = 'flex';
+}
+
+function closePriorRosterModal() {
+    const modal = document.getElementById('modal-prior-roster');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function savePriorRosterFromModal() {
+    const modal = document.getElementById('modal-prior-roster');
+    if (!modal) return;
+    
+    const selects = modal.querySelectorAll('select[data-staff-id]');
+    const newPriorRoster = {};
+    
+    selects.forEach(select => {
+        const staffId = select.getAttribute('data-staff-id');
+        const dayIdx = parseInt(select.getAttribute('data-day-idx'), 10);
+        const val = select.value;
+        
+        if (!newPriorRoster[staffId]) {
+            newPriorRoster[staffId] = new Array(7).fill('');
+        }
+        newPriorRoster[staffId][dayIdx] = val;
+    });
+    
+    state.priorRoster = newPriorRoster;
+    savePriorRoster();
+    closePriorRosterModal();
+    
+    // 警告を再計算して画面更新
+    refreshUI();
+    
+    if (typeof Portal !== 'undefined' && Portal.showToast) {
+        Portal.showToast('前月最終週の勤務実績を保存しました。自動生成と警告チェックに反映されます。', 'success');
+    }
 }
 
 

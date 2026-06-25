@@ -226,12 +226,20 @@ h1, h2, h3, h4, h5, h6 {
 .app-container {
     flex: 1;
     display: grid;
-    grid-template-columns: 320px 1fr;
+    grid-template-columns: 280px 1fr;
     gap: 24px;
     padding: 24px;
     max-width: 1600px;
     width: 100%;
     margin: 0 auto;
+}
+
+/* 設定パネル表示/非表示切り替え時のレイアウト調整 */
+.app-container.sidebar-collapsed {
+    grid-template-columns: 1fr !important;
+}
+.app-container.sidebar-collapsed .settings-sidebar {
+    display: none !important;
 }
 
 /* Sidebar Settings Panel */

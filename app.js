@@ -22,8 +22,10 @@ const state = {
     minSubOfficer: 1,
     minLarge: 1,
     minParamedic: 1,
+    minRescue: null,
     vehicleAssignments: {}, // dateStr -> vehicleObj
-    deployedVehicles: [] // array of vehicleNames that are active
+    deployedVehicles: [], // array of vehicleNames that are active
+    priorRoster: {} // staffId -> array of 7 prior shifts
 };
 
 // ログイン・ログアウト処理
@@ -683,6 +685,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderVehicleCheckboxes();
     initVehicleConfigModal();
     initTheme();
+    initSidebarToggle();
     bindEvents();
     
     // 初期表示として自動的に今日の日付（または保存された値）を設定して描画
@@ -715,6 +718,24 @@ document.addEventListener('DOMContentLoaded', () => {
     renderShiftConfigList();
     renderLegend();
     
+    // 移行期モーダル関連のイベントバインド
+    const btnOpenPrior = document.getElementById('btn-open-prior-roster');
+    if (btnOpenPrior) {
+        btnOpenPrior.addEventListener('click', openPriorRosterModal);
+    }
+    const btnPriorX = document.getElementById('btn-prior-modal-x');
+    if (btnPriorX) {
+        btnPriorX.addEventListener('click', closePriorRosterModal);
+    }
+    const btnPriorCancel = document.getElementById('btn-prior-modal-cancel');
+    if (btnPriorCancel) {
+        btnPriorCancel.addEventListener('click', closePriorRosterModal);
+    }
+    const btnPriorSave = document.getElementById('btn-prior-modal-save');
+    if (btnPriorSave) {
+        btnPriorSave.addEventListener('click', savePriorRosterFromModal);
+    }
+    
     refreshUI();
 });
 
@@ -723,6 +744,179 @@ function initTheme() {
     const savedTheme = localStorage.getItem('theme') || 'light';
     document.documentElement.setAttribute('data-theme', savedTheme);
     updateThemeIcon(savedTheme);
+}
+
+// 設定パネル表示/非表示の初期化
+function initSidebarToggle() {
+    const isCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
+    if (isCollapsed) {
+        const container = document.querySelector('.app-container');
+        if (container) {
+            container.classList.add('sidebar-collapsed');
+        }
+        const btnToggleSettings = document.getElementById('btn-toggle-settings');
+        if (btnToggleSettings) {
+            const btnSpan = btnToggleSettings.querySelector('span');
+            if (btnSpan) btnSpan.textContent = '⚙️ 設定表示';
+        }
+    }
+}
+
+// 移行期（前月最終週）の勤務実績データの保存・読込
+function loadPriorRoster() {
+    const dateStr = state.startDate ? state.startDate.toISOString().split('T')[0] : '';
+    const key = `fire_dept_prior_roster_${state.station}_${dateStr}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+        try {
+            state.priorRoster = JSON.parse(saved);
+        } catch (e) {
+            console.error('Failed to parse prior roster:', e);
+            state.priorRoster = {};
+        }
+    } else {
+        state.priorRoster = {};
+    }
+}
+
+function savePriorRoster() {
+    const dateStr = state.startDate ? state.startDate.toISOString().split('T')[0] : '';
+    const key = `fire_dept_prior_roster_${state.station}_${dateStr}`;
+    localStorage.setItem(key, JSON.stringify(state.priorRoster));
+}
+
+function openPriorRosterModal() {
+    const modal = document.getElementById('modal-prior-roster');
+    if (!modal) return;
+    
+    const activeStartDate = new Date(state.startDate);
+    activeStartDate.setDate(state.startDate.getDate() + (state.activeCycle - 1) * 28);
+    
+    // 直前7日間の日付を計算
+    const priorDates = [];
+    const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+    for (let i = 7; i >= 1; i--) {
+        const d = new Date(activeStartDate);
+        d.setDate(activeStartDate.getDate() - i);
+        priorDates.push(d);
+    }
+    
+    // ヘッダーの日付表示を更新
+    const headers = modal.querySelectorAll('.prior-date-header');
+    priorDates.forEach((date, idx) => {
+        if (headers[idx]) {
+            headers[idx].textContent = `${date.getMonth() + 1}/${date.getDate()}(${WEEKDAYS[date.getDay()]})`;
+        }
+    });
+    
+    // テーブル行の動的生成
+    const tbody = document.getElementById('prior-roster-table-body');
+    if (tbody) {
+        tbody.innerHTML = '';
+        
+        // 正規職員のみ対象
+        const regularStaff = state.staffList.filter(s => !s.isSupport);
+        
+        regularStaff.forEach(staff => {
+            const tr = document.createElement('tr');
+            
+            // 名前
+            const tdName = document.createElement('td');
+            tdName.style.padding = '8px 12px';
+            tdName.style.border = '1px solid var(--border-color)';
+            tdName.style.textAlign = 'left';
+            tdName.style.position = 'sticky';
+            tdName.style.left = '0';
+            tdName.style.backgroundColor = 'var(--bg-card)';
+            tdName.textContent = staff.name;
+            tr.appendChild(tdName);
+            
+            // 小隊
+            const tdPlatoon = document.createElement('td');
+            tdPlatoon.style.padding = '8px 4px';
+            tdPlatoon.style.border = '1px solid var(--border-color)';
+            tdPlatoon.textContent = `${staff.platoon}小隊`;
+            tr.appendChild(tdPlatoon);
+            
+            // 7日間のセレクトボックス
+            const savedVals = state.priorRoster[staff.id] || [];
+            for (let idx = 0; idx < 7; idx++) {
+                const tdSelect = document.createElement('td');
+                tdSelect.style.padding = '4px';
+                tdSelect.style.border = '1px solid var(--border-color)';
+                
+                const select = document.createElement('select');
+                select.className = 'form-control';
+                select.style.padding = '2px 4px';
+                select.style.fontSize = '12px';
+                select.style.height = '24px';
+                select.style.width = '100%';
+                select.setAttribute('data-staff-id', staff.id);
+                select.setAttribute('data-day-idx', idx);
+                
+                const shiftsOptions = [
+                    { value: "", text: "通常交代" },
+                    { value: "当", text: "当番" },
+                    { value: "明", text: "非番" },
+                    { value: "休", text: "週休" },
+                    { value: "有", text: "年休" },
+                    { value: "公", text: "公休" },
+                    { value: "張", text: "出張" },
+                    { value: "病", text: "病休" }
+                ];
+                
+                shiftsOptions.forEach(opt => {
+                    const elOpt = document.createElement('option');
+                    elOpt.value = opt.value;
+                    elOpt.textContent = opt.text;
+                    if (savedVals[idx] === opt.value) {
+                        elOpt.selected = true;
+                    }
+                    select.appendChild(elOpt);
+                });
+                
+                tdSelect.appendChild(select);
+                tr.appendChild(tdSelect);
+            }
+            tbody.appendChild(tr);
+        });
+    }
+    
+    modal.style.display = 'flex';
+}
+
+function closePriorRosterModal() {
+    const modal = document.getElementById('modal-prior-roster');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function savePriorRosterFromModal() {
+    const modal = document.getElementById('modal-prior-roster');
+    if (!modal) return;
+    
+    const selects = modal.querySelectorAll('select[data-staff-id]');
+    const newPriorRoster = {};
+    
+    selects.forEach(select => {
+        const staffId = select.getAttribute('data-staff-id');
+        const dayIdx = parseInt(select.getAttribute('data-day-idx'), 10);
+        const val = select.value;
+        
+        if (!newPriorRoster[staffId]) {
+            newPriorRoster[staffId] = new Array(7).fill('');
+        }
+        newPriorRoster[staffId][dayIdx] = val;
+    });
+    
+    state.priorRoster = newPriorRoster;
+    savePriorRoster();
+    closePriorRosterModal();
+    
+    // 警告を再計算して画面更新
+    refreshUI();
+    showCustomAlert('前月最終週の勤務実績を保存しました。自動生成と警告チェックに反映されます。');
 }
 
 function updateThemeIcon(theme) {
@@ -907,7 +1101,8 @@ function adjustSurplusLeaves(cycleNum, platoonNum) {
     const minSub = state.minSubOfficer;
     const minLarge = state.minLarge;
     const minPara = state.minParamedic;
-    console.log(`Settings - minStaff: ${minStaff}, minSub: ${minSub}, minLarge: ${minLarge}, minPara: ${minPara}`);
+    const minRescue = state.minRescue;
+    console.log(`Settings - minStaff: ${minStaff}, minSub: ${minSub}, minLarge: ${minLarge}, minPara: ${minPara}, minRescue: ${minRescue}`);
 
     // 祝日または年末年始かどうかの判定
     function isHolidayOrNewYear(dayIndex) {
@@ -1013,6 +1208,16 @@ function adjustSurplusLeaves(cycleNum, platoonNum) {
                 if (paraCount < minPara && paraCount < currentParaCount) {
                     console.log(`    [Skip] ${staff.name}: Paramedics remaining (${paraCount}) < minPara (${minPara}) and decreased`);
                     continue;
+                }
+
+                // 5. 救助隊員チェック
+                if (minRescue !== null && minRescue !== undefined && !isNaN(minRescue)) {
+                    const rescueCount = remaining.filter(s => s.isRescue).length;
+                    const currentRescueCount = onDutyStaff.filter(s => s.isRescue).length;
+                    if (rescueCount < minRescue && rescueCount < currentRescueCount) {
+                        console.log(`    [Skip] ${staff.name}: Rescue members remaining (${rescueCount}) < minRescue (${minRescue}) and decreased`);
+                        continue;
+                    }
                 }
                 
                 // --- 制約条件2: 連休（週休・休暇隣接）回避チェック ---
@@ -1304,6 +1509,7 @@ function handleDateChange() {
         }
     }
     updateGenerateButtonText();
+    loadPriorRoster();
     
     refreshUI();
 }
@@ -1419,6 +1625,20 @@ function bindEvents() {
         });
     }
 
+    // 設定パネル表示/非表示切り替え
+    const btnToggleSettings = document.getElementById('btn-toggle-settings');
+    if (btnToggleSettings) {
+        btnToggleSettings.addEventListener('click', () => {
+            const container = document.querySelector('.app-container');
+            const isCollapsed = container.classList.toggle('sidebar-collapsed');
+            localStorage.setItem('sidebar-collapsed', isCollapsed ? 'true' : 'false');
+            const btnSpan = btnToggleSettings.querySelector('span');
+            if (btnSpan) {
+                btnSpan.textContent = isCollapsed ? '⚙️ 設定表示' : '⚙️ 設定非表示';
+            }
+        });
+    }
+
     // テーマ切り替え
     document.getElementById('btn-theme-toggle').addEventListener('click', () => {
         const currentTheme = document.documentElement.getAttribute('data-theme');
@@ -1485,6 +1705,21 @@ function bindEvents() {
         if (val > 50) val = 50;
         e.target.value = val;
         state.minParamedic = val;
+        refreshUI();
+    });
+    
+    // 最低確保 救助隊員数の変更
+    document.getElementById('input-min-rescue').addEventListener('change', (e) => {
+        let val = parseInt(e.target.value);
+        if (e.target.value === '' || isNaN(val)) {
+            state.minRescue = null;
+            e.target.value = '';
+        } else {
+            if (val < 0) val = 0;
+            if (val > 50) val = 50;
+            e.target.value = val;
+            state.minRescue = val;
+        }
         refreshUI();
     });
     
@@ -1765,6 +2000,27 @@ function bindEvents() {
                                 }
                             }
                         }
+                    } else if (state.priorRoster && state.priorRoster[s.id]) {
+                        const prior = state.priorRoster[s.id];
+                        if (s.platoon === 1) {
+                            const checkIndices = [5, 3, 1];
+                            for (let idx of checkIndices) {
+                                if (prior[idx] === '当') {
+                                    prevConsecutive++;
+                                } else {
+                                    break;
+                                }
+                            }
+                        } else {
+                            const checkIndices = [6, 4, 2, 0];
+                            for (let idx of checkIndices) {
+                                if (prior[idx] === '当') {
+                                    prevConsecutive++;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
                     }
                     return {
                         ...s,
@@ -1772,7 +2028,7 @@ function bindEvents() {
                     };
                 });
 
-                const res = generateRoster(activeStartDate, staffListWithPrev, activeHopeShifts, state.minStaffing, state.minSubOfficer, state.minLarge, state.minParamedic);
+                const res = generateRoster(activeStartDate, staffListWithPrev, activeHopeShifts, state.minStaffing, state.minSubOfficer, state.minLarge, state.minParamedic, state.minRescue);
                 
                 const resetButtonState = () => {
                     updateGenerateButtonText();
@@ -1877,6 +2133,7 @@ function bindEvents() {
             minSubOfficer: state.minSubOfficer,
             minLarge: state.minLarge,
             minParamedic: state.minParamedic,
+            minRescue: state.minRescue,
             staffList: state.staffList,
             hopeShifts: state.hopeShifts,
             roster: state.roster,
@@ -1963,6 +2220,10 @@ function bindEvents() {
                 
                 state.minParamedic = data.minParamedic !== undefined ? data.minParamedic : 1;
                 document.getElementById('input-min-paramedic').value = state.minParamedic;
+                
+                state.minRescue = data.minRescue !== undefined ? data.minRescue : null;
+                const elInputMinRescue = document.getElementById('input-min-rescue');
+                if (elInputMinRescue) elInputMinRescue.value = state.minRescue !== null ? state.minRescue : '';
                 
                 state.hourlyLeaves = data.hourlyLeaves || {};
                 
@@ -2149,6 +2410,8 @@ function refreshUI() {
     document.getElementById('input-min-subofficer').disabled = !isAdmin;
     document.getElementById('input-min-large').disabled = !isAdmin;
     document.getElementById('input-min-paramedic').disabled = !isAdmin;
+    const elInputMinRescue = document.getElementById('input-min-rescue');
+    if (elInputMinRescue) elInputMinRescue.disabled = !isAdmin;
     document.getElementById('select-regen-start-day').disabled = !isAdmin;
     const chkAutoLeave = document.getElementById('chk-auto-leave');
     if (chkAutoLeave) chkAutoLeave.disabled = !isAdmin;
@@ -2170,11 +2433,30 @@ function refreshUI() {
             const key = `${state.activeCycle - 1}_${s.id}`;
             prevRoster[s.id] = state.roster[key] || new Array(28).fill('-');
         });
+    } else if (state.priorRoster) {
+        prevRoster = {};
+        state.staffList.forEach(s => {
+            const prior = state.priorRoster[s.id];
+            if (prior) {
+                const dummySched = new Array(28).fill('-');
+                if (s.platoon === 1) {
+                    dummySched[26] = prior[5] || '-';
+                    dummySched[24] = prior[3] || '-';
+                    dummySched[22] = prior[1] || '-';
+                } else {
+                    dummySched[27] = prior[6] || '-';
+                    dummySched[25] = prior[4] || '-';
+                    dummySched[23] = prior[2] || '-';
+                    dummySched[21] = prior[0] || '-';
+                }
+                prevRoster[s.id] = dummySched;
+            }
+        });
     }
 
     const activeStartDate = new Date(state.startDate);
     activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
-    state.warnings = validateRoster(activeRoster, state.staffList, state.minStaffing, prevRoster, state.minSubOfficer, state.minLarge, state.minParamedic, activeStartDate);
+    state.warnings = validateRoster(activeRoster, state.staffList, state.minStaffing, prevRoster, state.minSubOfficer, state.minLarge, state.minParamedic, activeStartDate, state.minRescue);
     renderWarnings();
     
     // アクティブなタブに合わせて描画
