@@ -31,6 +31,11 @@ router.post('/login', (req, res) => {
         return res.status(400).json({ error: '消防本部、職員番号、暗証番号を入力してください。' });
     }
     
+    let targetDeptCode = department_code;
+    if (typeof department_code === 'string' && department_code.startsWith('st_')) {
+        targetDeptCode = 'ibusuki';
+    }
+
     try {
         // 職員をデータベースから取得
         const query = `
@@ -40,7 +45,7 @@ router.post('/login', (req, res) => {
             JOIN stations st ON s.station_id = st.id
             WHERE fd.code = ? AND s.employee_number = ? AND s.is_active = 1
         `;
-        const staff = db.prepare(query).get(department_code, employee_number);
+        const staff = db.prepare(query).get(targetDeptCode, employee_number);
         
         if (!staff) {
             return res.status(401).json({ error: '職員番号または暗証番号が正しくありません。' });

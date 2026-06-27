@@ -32,7 +32,8 @@ const state = {
     vehicleAssignments: {},
     deployedVehicles: [],
     isConfirmed: false,
-    priorRoster: {} // staffId -> array of 7 prior shifts
+    priorRoster: {}, // staffId -> array of 7 prior shifts
+    viewPlatoon: 'both' // 表示する小隊 ('both', '1', '2')
 };
 
 const DEFAULT_VEHICLE_SPECS = [
@@ -868,7 +869,8 @@ async function saveDraftWithName(draftName) {
         deployedVehicles: state.deployedVehicles,
         vehicleAssignments: state.vehicleAssignments,
         hourlyLeaves: state.hourlyLeaves,
-        staffList: state.staffList
+        staffList: state.staffList,
+        hopeShifts: state.hopeShifts
     };
 
     try {
@@ -925,13 +927,27 @@ async function openDraftHistoryModal() {
         data.drafts.forEach(draft => {
             const tr = document.createElement('tr');
             
-            // 下書き名
+            // 確定履歴であるかの判定
+            const isConfirmed = draft.draft_name.startsWith('[確定履歴]');
+            
+            // 履歴名 / 分割バッジ
             const tdName = document.createElement('td');
             tdName.style.padding = '8px 12px';
             tdName.style.border = '1px solid var(--border-color)';
             tdName.style.textAlign = 'left';
             tdName.style.fontWeight = '500';
-            tdName.textContent = draft.draft_name;
+            
+            let displayName = draft.draft_name;
+            let badgeHTML = '';
+            
+            if (isConfirmed) {
+                displayName = draft.draft_name.replace('[確定履歴]', '').trim();
+                badgeHTML = `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; font-size:10px; padding:3px 8px; border-radius:4px; font-weight:600; margin-left:8px; vertical-align:middle; width:auto; height:auto; display:inline-flex; white-space:nowrap; box-shadow:none;">確定版</span>`;
+            } else {
+                badgeHTML = `<span class="badge badge-off" style="font-size:10px; padding:3px 8px; border-radius:4px; font-weight:600; margin-left:8px; vertical-align:middle; width:auto; height:auto; display:inline-flex; white-space:nowrap; box-shadow:none;">下書き</span>`;
+            }
+            
+            tdName.innerHTML = `<span style="vertical-align:middle;">${displayName}</span>${badgeHTML}`;
             tr.appendChild(tdName);
 
             // 保存日時
@@ -962,7 +978,7 @@ async function openDraftHistoryModal() {
             btnLoad.style.fontSize = '11px';
             btnLoad.textContent = '適用';
             btnLoad.addEventListener('click', () => {
-                loadDraftData(draft.id);
+                loadDraftData(draft.id, isConfirmed);
             });
 
             const btnDelete = document.createElement('button');
@@ -973,7 +989,7 @@ async function openDraftHistoryModal() {
             btnDelete.style.borderColor = 'var(--border-color)';
             btnDelete.textContent = '削除';
             btnDelete.addEventListener('click', () => {
-                deleteDraftData(draft.id, tr);
+                deleteDraftData(draft.id, tr, isConfirmed);
             });
 
             tdAction.appendChild(btnLoad);
@@ -998,8 +1014,11 @@ function closeDraftHistoryModal() {
 }
 
 // 特定の下書きをロードして適用
-async function loadDraftData(draftId) {
-    const confirmed = await showCustomConfirm('選択した下書きを読み込みますか？\n現在編集中の内容は上書きされます。');
+async function loadDraftData(draftId, isConfirmedHistory = false) {
+    const msg = isConfirmedHistory
+        ? '選択した確定履歴データを適用しますか？\n現在編集中のスケジュール・配置は上書きされます。'
+        : '選択した下書きを読み込みますか？\n現在編集中のスケジュール・配置は上書きされます。';
+    const confirmed = await showCustomConfirm(msg);
     if (!confirmed) return;
 
     try {
@@ -1022,6 +1041,7 @@ async function loadDraftData(draftId) {
         state.deployedVehicles = draft.deployedVehicles || [];
         state.vehicleAssignments = draft.vehicleAssignments || {};
         state.hourlyLeaves = draft.hourlyLeaves || {};
+        state.hopeShifts = draft.hopeShifts || {};
         
         // rosterのマッピング
         state.roster = {};
@@ -1048,9 +1068,12 @@ async function loadDraftData(draftId) {
     }
 }
 
-// 下書きの削除
-async function deleteDraftData(draftId, rowElement) {
-    const confirmed = await showCustomConfirm('この下書きを削除してもよろしいですか？');
+// 下書き・確定履歴の削除
+async function deleteDraftData(draftId, rowElement, isConfirmedHistory = false) {
+    const msg = isConfirmedHistory
+        ? 'この確定履歴（自動バックアップ）データを削除してもよろしいですか？\n※過去に適用された本番確定版の履歴が失われます。'
+        : 'この下書きを削除してもよろしいですか？';
+    const confirmed = await showCustomConfirm(msg);
     if (!confirmed) return;
 
     try {
@@ -1127,6 +1150,40 @@ async function confirmSchedule() {
     }
 }
 
+// 勤務スケジュール確定解除 (再編集可能にする)
+async function unconfirmSchedule() {
+    const isConfirmed = await showCustomConfirm('確定を解除して編集可能に戻しますか？\n（未打刻の自動生成勤怠データは削除されます）');
+    if (!isConfirmed) return;
+
+    try {
+        const payload = {
+            station_id: state.stationId,
+            start_date: state.startDate,
+            cycle_number: state.activeCycle
+        };
+
+        const response = await fetch('/api/schedule/unconfirm', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${Auth.token}`
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+            Portal.showToast(data.message, 'success');
+            state.isConfirmed = false;
+            refreshUI();
+        } else {
+            Portal.showToast(data.error, 'error');
+        }
+    } catch (err) {
+        console.error('Unconfirm error:', err);
+        Portal.showToast('通信エラーが発生しました。', 'error');
+    }
+}
+
 // DOMの初期化と起動
 
 async function render(container) {
@@ -1145,10 +1202,21 @@ async function render(container) {
             </div>
             <div style="display:flex; gap:12px; align-items:center;">
                 <button id="btn-toggle-settings" class="btn btn-secondary" style="font-size:13px; padding:6px 16px;">⚙️ 設定非表示</button>
-                <button id="btn-history-drafts" class="btn btn-secondary admin-only" style="font-size:13px; padding:6px 16px;">📂 下書き履歴</button>
+                <button id="btn-history-drafts" class="btn btn-secondary admin-only" style="font-size:13px; padding:6px 16px;">📂 下書き・確定履歴</button>
                 <button id="btn-save-draft" class="btn btn-secondary admin-only" style="font-size:13px; padding:6px 16px;">下書き保存</button>
                 <button id="btn-confirm-schedule" class="btn btn-primary admin-only" style="font-size:13px; padding:6px 16px;">勤務表を確定</button>
             </div>
+        </div>
+        
+        <div id="confirm-alert-banner" class="no-print" style="display:none; align-items:center; justify-content:space-between; padding:12px 16px; background:rgba(224, 242, 254, 0.9); border:1px solid #bae6fd; border-radius:var(--radius-md); margin-bottom:16px; color:#0369a1; font-size:13px; font-weight:500;">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:18px; height:18px;">
+                    <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke-linejoin="round"/>
+                    <path d="M12 8V12M12 16H12.01" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>このサイクルの勤務表は確定済み（本番反映中）です。勤務を変更・再編集するには確定を解除してください。</span>
+            </div>
+            <button id="btn-unconfirm-schedule" class="btn btn-danger admin-only" style="font-size:12px; padding:4px 12px; height:28px;">確定を解除して変更する</button>
         </div>
         
         <main class="app-container" style="margin-top:0; padding:0; display:flex; gap:20px; width:100%;">
@@ -1159,6 +1227,14 @@ async function render(container) {
                     <div class="form-group">
                         <label class="form-label" style="font-size:11px; margin-bottom:4px;">所属署所</label>
                         <input type="text" class="form-control" id="input-station" value="" disabled style="font-size:12px; padding:4px 8px; height:28px; background:rgba(255,255,255,0.03);">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" style="font-size:11px; margin-bottom:4px;">小隊選択</label>
+                        <select class="form-control" id="select-view-platoon" style="font-size:12px; padding:2px 8px; height:28px; background:var(--bg-input); color:var(--text-primary); border:1px solid var(--border-color);">
+                            <option value="both">両小隊 (すべて)</option>
+                            <option value="1">${window.safeStorage.getItem('master_platoon_names') ? window.safeStorage.getItem('master_platoon_names').split(',')[0].trim() : '第 1 小隊'}</option>
+                            <option value="2">${window.safeStorage.getItem('master_platoon_names') ? window.safeStorage.getItem('master_platoon_names').split(',')[1].trim() : '第 2 小隊'}</option>
+                        </select>
                     </div>
                     <div class="form-group">
                         <label class="form-label" style="font-size:11px; margin-bottom:4px;">起算日 (開始日)</label>
@@ -1297,8 +1373,8 @@ async function render(container) {
                                 <div class="form-group">
                                     <label class="form-label" style="font-size:11px; margin-bottom:4px;">所属小隊</label>
                                     <select class="form-control" id="support-platoon" style="font-size:12px; padding:2px 8px; height:28px;">
-                                        <option value="1">第1小隊</option>
-                                        <option value="2">第2小隊</option>
+                                        <option value="1">${window.safeStorage.getItem('master_platoon_names') ? window.safeStorage.getItem('master_platoon_names').split(',')[0].trim() : '第1小隊'}</option>
+                                        <option value="2">${window.safeStorage.getItem('master_platoon_names') ? window.safeStorage.getItem('master_platoon_names').split(',')[1].trim() : '第2小隊'}</option>
                                     </select>
                                 </div>
                                 <div class="form-group">
@@ -1591,8 +1667,8 @@ async function render(container) {
                 </div>
                 
                 <div class="modal-platoon-tabs" style="display: flex; gap: 8px; background-color: var(--secondary-bg); padding: 4px; border-radius: var(--radius-sm);">
-                    <button id="modal-btn-platoon-1" class="platoon-tab-btn active" style="flex: 1; border: none; background: transparent; padding: 6px 12px; font-size: 12px; font-weight: 500; cursor: pointer; border-radius: 4px;">A日 (第1小隊)</button>
-                    <button id="modal-btn-platoon-2" class="platoon-tab-btn" style="flex: 1; border: none; background: transparent; padding: 6px 12px; font-size: 12px; font-weight: 500; cursor: pointer; border-radius: 4px;">B日 (第2小隊)</button>
+                    <button id="modal-btn-platoon-1" class="platoon-tab-btn active" style="flex: 1; border: none; background: transparent; padding: 6px 12px; font-size: 12px; font-weight: 500; cursor: pointer; border-radius: 4px;">A日 (${window.safeStorage.getItem('master_platoon_names') ? window.safeStorage.getItem('master_platoon_names').split(',')[0].trim() : '第1小隊'})</button>
+                    <button id="modal-btn-platoon-2" class="platoon-tab-btn" style="flex: 1; border: none; background: transparent; padding: 6px 12px; font-size: 12px; font-weight: 500; cursor: pointer; border-radius: 4px;">B日 (${window.safeStorage.getItem('master_platoon_names') ? window.safeStorage.getItem('master_platoon_names').split(',')[1].trim() : '第2小隊'})</button>
                 </div>
                 
                 <div style="overflow-y: auto; flex: 1; min-height: 250px;">
@@ -1671,17 +1747,17 @@ async function render(container) {
         <div id="modal-draft-history" class="modal no-print" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 9999;">
             <div class="modal-content" style="background: var(--bg-card); padding: 24px; border-radius: var(--radius-lg); border: 1px solid var(--border-color); max-width: 800px; width: 95%; max-height: 85%; display: flex; flex-direction: column; gap: 16px; box-shadow: var(--shadow-lg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
-                    <h4 style="margin: 0; font-size: 16px; font-weight: 600;">📂 下書き履歴一覧</h4>
+                    <h4 style="margin: 0; font-size: 16px; font-weight: 600;">📂 下書き・確定履歴一覧</h4>
                     <button id="btn-draft-modal-x" style="background: transparent; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary); line-height: 1;">&times;</button>
                 </div>
                 <p style="margin: 0; font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
-                   保存された下書きの一覧です。「適用」をクリックすると現在の勤務表・車両配置に反映されます。（現在編集中の内容は上書きされます）
+                   一時保存された下書き、および確定完了時の自動バックアップ履歴の一覧です。「適用」をクリックすると、現在の勤務スケジュール・車両配置・事前指定等へデータを反映します。（現在編集中の内容は上書きされます）
                 </p>
                 <div style="overflow-y: auto; flex: 1; min-height: 250px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
                     <table class="roster-grid" style="width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed;">
                         <thead>
                             <tr style="background-color: var(--secondary-bg); position: sticky; top: 0; z-index: 10;">
-                                <th style="text-align: left; padding: 8px 12px; width: 200px;">下書き名</th>
+                                <th style="text-align: left; padding: 8px 12px; width: 220px;">履歴名 / 分類</th>
                                 <th style="width: 140px; padding: 8px 4px; text-align: center;">保存日時</th>
                                 <th style="width: 100px; padding: 8px 4px; text-align: center;">保存者</th>
                                 <th style="width: 140px; padding: 8px 4px; text-align: center;">操作</th>
@@ -1722,6 +1798,7 @@ async function render(container) {
     document.getElementById('input-start-date').value = state.startDate;
     document.getElementById('select-cycle').value = state.activeCycle;
     document.getElementById('input-station').value = state.station;
+    document.getElementById('select-view-platoon').value = state.viewPlatoon;
 
     // APIからデータロード
     await loadDataFromAPI();
@@ -2462,6 +2539,15 @@ function updateGenerateButtonText() {
 
 // イベントリスナーの紐付け
 function bindEvents() {
+    // 小隊選択の変更
+    const elSelectViewPlatoon = document.getElementById('select-view-platoon');
+    if (elSelectViewPlatoon) {
+        elSelectViewPlatoon.addEventListener('change', (e) => {
+            state.viewPlatoon = e.target.value;
+            refreshUI();
+        });
+    }
+
     // 署所名変更
     const elInputStation = document.getElementById('input-station');
     if (elInputStation) {
@@ -3081,6 +3167,13 @@ function bindEvents() {
         });
     }
     
+    const elBtnUnconfirmSchedule = document.getElementById('btn-unconfirm-schedule');
+    if (elBtnUnconfirmSchedule) {
+        elBtnUnconfirmSchedule.addEventListener('click', () => {
+            unconfirmSchedule();
+        });
+    }
+    
     const elFileLoader = document.getElementById('file-loader');
     if (elFileLoader) {
         elFileLoader.addEventListener('change', (e) => {
@@ -3344,11 +3437,21 @@ function bindEvents() {
 // UIの全体更新
 function refreshUI() {
     // 閲覧専用モードなら各種設定の入力を無効化
-    const isAdmin = state.userRole === 'admin';
+    const isAdmin = ['admin', 'sysadmin', 'chief'].includes(state.userRole);
     const setDisabled = (id, val) => {
         const el = document.getElementById(id);
         if (el) el.disabled = val;
     };
+
+    // 確定警告バナーの表示切り替え
+    const elConfirmAlert = document.getElementById('confirm-alert-banner');
+    if (elConfirmAlert) {
+        if (state.isConfirmed) {
+            elConfirmAlert.style.display = 'flex';
+        } else {
+            elConfirmAlert.style.display = 'none';
+        }
+    }
     setDisabled('input-station', !isAdmin);
     setDisabled('input-start-date', !isAdmin);
     setDisabled('input-platoon-size', !isAdmin);
@@ -3535,7 +3638,8 @@ function renderRosterTable() {
     const activeStartDate = new Date(state.startDate);
     activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
     
-    [1, 2].forEach(platoonNum => {
+    const platoonsToRender = state.viewPlatoon === 'both' ? [1, 2] : [parseInt(state.viewPlatoon)];
+    platoonsToRender.forEach(platoonNum => {
         // セクションタイトル
         const sectionTitle = document.createElement('div');
         sectionTitle.className = 'platoon-section-title';
@@ -4180,7 +4284,8 @@ function renderHopeTable() {
     const activeStartDate = new Date(state.startDate);
     activeStartDate.setDate(activeStartDate.getDate() + (state.activeCycle - 1) * 28);
     
-    [1, 2].forEach(platoonNum => {
+    const platoonsToRender = state.viewPlatoon === 'both' ? [1, 2] : [parseInt(state.viewPlatoon)];
+    platoonsToRender.forEach(platoonNum => {
         const sectionTitle = document.createElement('div');
         sectionTitle.className = 'platoon-section-title';
         sectionTitle.textContent = `第 ${platoonNum} 小隊`;
@@ -5360,10 +5465,11 @@ function renderVehicleView() {
             card.className = 'vehicle-card';
             card.dataset.vehicle = spec.name;
             card.style.background = 'var(--bg-card)';
-            card.style.border = '1px solid var(--border-color)';
+            card.style.border = isCompleted ? '2px solid var(--success)' : '1px solid var(--border-color)';
             card.style.borderRadius = 'var(--radius-md)';
             card.style.overflow = 'hidden';
-            card.style.boxShadow = 'var(--shadow-sm)';
+            card.style.boxShadow = isCompleted ? '0 0 12px rgba(16,185,129,0.15)' : 'var(--shadow-sm)';
+            card.style.transition = 'all 0.2s ease';
             
             const header = document.createElement('div');
             header.className = 'vehicle-card-header';
@@ -5388,43 +5494,61 @@ function renderVehicleView() {
             h4.textContent = spec.name;
             titleArea.appendChild(h4);
             
-            const lblComplete = document.createElement('label');
-            lblComplete.style.display = 'flex';
-            lblComplete.style.alignItems = 'center';
-            lblComplete.style.gap = '4px';
-            lblComplete.style.fontSize = '11px';
-            lblComplete.style.cursor = 'pointer';
-            lblComplete.style.margin = '0';
-            lblComplete.style.fontWeight = 'normal';
-            lblComplete.style.color = 'rgba(255,255,255,0.9)';
-            lblComplete.style.userSelect = 'none';
-            
-            const chkComplete = document.createElement('input');
-            chkComplete.type = 'checkbox';
-            chkComplete.className = 'vehicle-complete-checkbox';
-            chkComplete.dataset.vehicle = spec.name;
-            chkComplete.checked = !!isCompleted;
-            
-            chkComplete.addEventListener('change', (e) => {
-                const checked = e.target.checked;
-                if (!state.vehicleAssignments[dateStr]) {
-                    state.vehicleAssignments[dateStr] = {};
-                }
-                if (!state.vehicleAssignments[dateStr][spec.name]) {
-                    state.vehicleAssignments[dateStr][spec.name] = {};
-                }
-                if (checked) {
-                    const dummyStaffId = onDutyStaff.length > 0 ? onDutyStaff[0].id : "999999";
-                    state.vehicleAssignments[dateStr][spec.name]['completed'] = dummyStaffId;
+            // 決定・変更ボタンの作成
+            if (state.userRole === 'admin') {
+                const actionBtn = document.createElement('button');
+                actionBtn.style.padding = '2px 8px';
+                actionBtn.style.fontSize = '11px';
+                actionBtn.style.borderRadius = '4px';
+                actionBtn.style.border = '1px solid rgba(255,255,255,0.4)';
+                actionBtn.style.cursor = 'pointer';
+                actionBtn.style.marginLeft = '8px';
+                actionBtn.style.fontWeight = '600';
+                actionBtn.style.transition = 'all 0.15s';
+
+                if (isCompleted) {
+                    actionBtn.textContent = '変更';
+                    actionBtn.style.background = 'rgba(255,255,255,0.15)';
+                    actionBtn.style.color = '#ffffff';
+                    actionBtn.title = '配置を再編集可能にする';
+                    actionBtn.addEventListener('click', () => {
+                        if (state.vehicleAssignments[dateStr] && state.vehicleAssignments[dateStr][spec.name]) {
+                            delete state.vehicleAssignments[dateStr][spec.name]['completed'];
+                        }
+                        renderVehicleView();
+                    });
                 } else {
-                    delete state.vehicleAssignments[dateStr][spec.name]['completed'];
+                    actionBtn.textContent = '決定';
+                    actionBtn.style.background = '#ffffff';
+                    actionBtn.style.color = getVehicleColor(spec.name);
+                    actionBtn.title = 'この配置で決定し、ロックします';
+                    actionBtn.addEventListener('click', () => {
+                        if (!state.vehicleAssignments[dateStr]) {
+                            state.vehicleAssignments[dateStr] = {};
+                        }
+                        if (!state.vehicleAssignments[dateStr][spec.name]) {
+                            state.vehicleAssignments[dateStr][spec.name] = {};
+                        }
+                        const dummyStaffId = onDutyStaff.length > 0 ? onDutyStaff[0].id : "999999";
+                        state.vehicleAssignments[dateStr][spec.name]['completed'] = dummyStaffId;
+                        renderVehicleView();
+                    });
                 }
-                renderVehicleView();
-            });
-            
-            lblComplete.appendChild(chkComplete);
-            lblComplete.appendChild(document.createTextNode(' 完了'));
-            titleArea.appendChild(lblComplete);
+                titleArea.appendChild(actionBtn);
+            } else {
+                if (isCompleted) {
+                    const statusText = document.createElement('span');
+                    statusText.textContent = '【決定】';
+                    statusText.style.fontSize = '11px';
+                    statusText.style.fontWeight = '600';
+                    statusText.style.color = 'rgba(255,255,255,0.9)';
+                    statusText.style.background = 'rgba(255,255,255,0.15)';
+                    statusText.style.padding = '1px 5px';
+                    statusText.style.borderRadius = '3px';
+                    statusText.style.marginLeft = '8px';
+                    titleArea.appendChild(statusText);
+                }
+            }
             
             header.appendChild(titleArea);
             
@@ -5495,7 +5619,8 @@ function renderVehicleView() {
         const vehicle = select.dataset.vehicle;
         const role = select.dataset.role;
         
-        select.disabled = (state.userRole !== 'admin');
+        const isCompleted = currentAssignment[vehicle] && currentAssignment[vehicle]['completed'];
+        select.disabled = (state.userRole !== 'admin' || !!isCompleted);
         select.innerHTML = '<option value="">-- 未指定 --</option>';
         
         onDutyStaff.forEach(staff => {

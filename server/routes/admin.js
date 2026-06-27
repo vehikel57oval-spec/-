@@ -40,9 +40,9 @@ router.get('/staff', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (re
 
 /**
  * @route   POST /api/admin/staff
- * @desc    新規職員の登録 (admin, sysadmin)
+ * @desc    新規職員の登録 (chief, admin, sysadmin)
  */
-router.post('/staff', verifyToken, requireRole('admin', 'sysadmin'), (req, res) => {
+router.post('/staff', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
     const {
         employee_number, pin, name, station_id, platoon, rank, position,
         has_large_license, is_paramedic, is_rescue, is_kikan,
@@ -107,9 +107,9 @@ router.post('/staff', verifyToken, requireRole('admin', 'sysadmin'), (req, res) 
 
 /**
  * @route   PUT /api/admin/staff/:id
- * @desc    職員情報の更新 (admin, sysadmin)
+ * @desc    職員情報の更新 (chief, admin, sysadmin)
  */
-router.put('/staff/:id', verifyToken, requireRole('admin', 'sysadmin'), (req, res) => {
+router.put('/staff/:id', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
     const staffId = req.params.id;
     const {
         pin, name, station_id, platoon, rank, position,
@@ -181,9 +181,9 @@ router.put('/staff/:id', verifyToken, requireRole('admin', 'sysadmin'), (req, re
 
 /**
  * @route   POST /api/admin/staff/import
- * @desc    CSVから職員リストを一括インポート (Upsert) (admin, sysadmin)
+ * @desc    CSVから職員リストを一括インポート (Upsert) (chief, admin, sysadmin)
  */
-router.post('/staff/import', verifyToken, requireRole('admin', 'sysadmin'), (req, res) => {
+router.post('/staff/import', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
     const { staffList } = req.body;
     if (!staffList || !Array.isArray(staffList)) {
         return res.status(400).json({ error: 'インポートする職員データが正しくありません。' });

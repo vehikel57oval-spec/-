@@ -186,6 +186,33 @@ const Ledger = {
                 `;
             }
 
+            if (name === '下書き') {
+                return `
+                    <div class="hanko-box">
+                        <div class="hanko-title">${title}</div>
+                        <div class="hanko-space">
+                            <div class="draft-stamp" style="
+                                border: 2px solid #ef4444;
+                                color: #ef4444;
+                                padding: 2px 6px;
+                                font-size: 11px;
+                                font-weight: bold;
+                                transform: rotate(-6deg);
+                                background: rgba(239, 68, 68, 0.05);
+                                border-radius: 3px;
+                                font-family: sans-serif;
+                                letter-spacing: 1px;
+                                text-align: center;
+                                white-space: nowrap;
+                                box-shadow: 0 0 2px rgba(239, 68, 68, 0.2);
+                            ">
+                                下書き
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
             const shortName = name.length > 3 ? name.substring(0, 3) : name;
             const dateLabel = dateStr ? dateStr.substring(5, 10).replace('-', '/') : '';
             return `
@@ -203,8 +230,8 @@ const Ledger = {
             `;
         };
 
-        // 本人印と承認印の出し分け
-        const selfHankoName = (approval.status === 'submitted' || approval.status === 'approved') ? staff.name : null;
+        // 本人印と承認印の出し分け (下書き状態の時は本人欄に「下書き」を配置)
+        const selfHankoName = (approval.status === 'submitted' || approval.status === 'approved') ? staff.name : '下書き';
         const selfHankoDate = approval.submitted_at;
         
         const chiefHankoName = approval.status === 'approved' ? (approval.approved_by_name || '署長') : null;
@@ -258,7 +285,7 @@ const Ledger = {
                                 <tr style="background:#f1f5f9; color:#1e293b; border-bottom:2px solid #64748b; font-weight:600;">
                                     <th style="border: 1px solid #cbd5e1; text-align:center; padding:8px 4px; width:40px;">日</th>
                                     <th style="border: 1px solid #cbd5e1; text-align:center; padding:8px 4px; width:40px;">曜</th>
-                                    <th style="border: 1px solid #cbd5e1; text-align:center; padding:8px 8px; width:80px;">予定勤務</th>
+                                    <th style="border: 1px solid #cbd5e1; text-align:center; padding:8px 8px; width:80px;">勤務実績</th>
                                     <th style="border: 1px solid #cbd5e1; text-align:center; padding:8px 8px; width:100px;">出勤時刻</th>
                                     <th style="border: 1px solid #cbd5e1; text-align:center; padding:8px 8px; width:100px;">退勤時刻</th>
                                     <th style="border: 1px solid #cbd5e1; text-align:right; padding:8px 8px; width:70px;">所定(h)</th>
@@ -281,14 +308,19 @@ const Ledger = {
                                         rowStyle = 'background: rgba(37, 99, 235, 0.02);';
                                         dayOfWeekColor = 'color: #2563eb; font-weight:600;';
                                     }
-
-                                    // シフト区分バッジ
+ 
+                                    // シフト区分バッジ (勤務スケジュールと整合をとる)
                                     let shiftBadge = '';
-                                    if (day.scheduled_shift === 'tou') shiftBadge = '<span class="badge badge-tou">当務</span>';
+                                    if (day.scheduled_shift === 'tou') shiftBadge = '<span class="badge badge-tou">勤務</span>';
                                     else if (day.scheduled_shift === 'nik') shiftBadge = '<span class="badge badge-nik">日勤</span>';
                                     else if (day.scheduled_shift === 'paid') shiftBadge = '<span class="badge badge-paid">年休</span>';
                                     else if (day.scheduled_shift === 'special') shiftBadge = '<span class="badge badge-special">特休</span>';
                                     else if (day.scheduled_shift === 'hol') shiftBadge = '<span class="badge badge-holiday">週休</span>';
+                                    else if (day.scheduled_shift === 'off') shiftBadge = '<span class="badge badge-off">非番</span>';
+                                    else if (day.scheduled_shift === 'public') shiftBadge = '<span class="badge" style="background:#f3e8ff; color:#6b21a8; border:1px solid #d8b4fe; padding:2px 6px; font-size:11px; border-radius:4px; font-weight:600;">公休</span>';
+                                    else if (day.scheduled_shift === 'business') shiftBadge = '<span class="badge badge-business">出張</span>';
+                                    else if (day.scheduled_shift === 'sick') shiftBadge = '<span class="badge badge-sick">病休</span>';
+                                    else if (day.scheduled_shift === 'compensatory') shiftBadge = '<span class="badge badge-off" style="background:#e2e8f0; color:#475569;">代休</span>';
                                     else shiftBadge = `<span class="badge badge-off">${day.shift_label}</span>`;
 
                                     // 打刻文字色（未打刻のグレー表示）

@@ -1465,6 +1465,7 @@ class Statement {
             const vehicle_data = typeof params[8] === 'string' ? JSON.parse(params[8]) : params[8];
             const hourly_leaves = typeof params[9] === 'string' ? JSON.parse(params[9]) : params[9];
             const staff_list = typeof params[10] === 'string' ? JSON.parse(params[10]) : params[10];
+            const hope_shifts = typeof params[11] === 'string' ? JSON.parse(params[11]) : params[11];
             
             dbData.schedule_drafts.push({
                 id,
@@ -1478,7 +1479,8 @@ class Statement {
                 roster_data,
                 vehicle_data,
                 hourly_leaves,
-                staff_list
+                staff_list,
+                hope_shifts
             });
             
             lastInsertRowid = id;

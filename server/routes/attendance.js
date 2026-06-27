@@ -897,16 +897,36 @@ router.get('/ledger', verifyToken, (req, res) => {
             if (attendance) {
                 clockIn = attendance.actual_clock_in ? attendance.actual_clock_in.substring(11, 16) : '';
                 clockOut = attendance.actual_clock_out ? attendance.actual_clock_out.substring(11, 16) : '';
-                actualHours = attendance.actual_hours || 0;
+                
+                // 打刻による実働時間がある場合はそれを使用し、無い場合は所定時間を仮実績とする
+                if (attendance.actual_hours !== undefined && attendance.actual_hours !== null && attendance.actual_hours > 0) {
+                    actualHours = attendance.actual_hours;
+                } else if (attendance.status === 'present' || attendance.status === 'working') {
+                    actualHours = scheduledHours; // 出勤扱いなら所定時間を充当
+                } else {
+                    actualHours = 0;
+                }
+                
                 overtimeHours = attendance.overtime_hours || 0;
                 status = attendance.status;
+            } else {
+                // 打刻が無い場合でも、過去の日付で勤務予定（当務・日勤）かつ休暇でなければ、デフォルトで出勤完了（所定時間＝実働時間）として集計に加算する
+                const isPastDate = dateStr < todayStr;
+                if (isPastDate && (shiftCode === 'tou' || shiftCode === 'nik') && shiftCode !== 'paid' && shiftCode !== 'special') {
+                    actualHours = scheduledHours;
+                    status = 'present';
+                } else {
+                    actualHours = 0;
+                }
             }
             
             // 欠勤（当直/日勤予定で、休暇でなく、打刻実績がなく、本日の日付より過去である場合）
             const isPastDate = dateStr < todayStr;
             if (isPastDate && (shiftCode === 'tou' || shiftCode === 'nik') && shiftCode !== 'paid' && shiftCode !== 'special' && (!attendance || attendance.status === 'absent')) {
-                absentDays += 1;
-                status = 'absent';
+                if (actualHours === 0) {
+                    absentDays += 1;
+                    status = 'absent';
+                }
             }
             
             totalScheduledHours += scheduledHours;

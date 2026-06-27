@@ -516,7 +516,10 @@ router.post('/save', verifyToken, requireRole('admin', 'sysadmin', 'chief'), (re
                         for (const [vehicleName, rolesObj] of Object.entries(vehiclesObj)) {
                             for (const [roleName, staffIdStr] of Object.entries(rolesObj)) {
                                 if (staffIdStr) {
-                                    const mappedStaffId = parseInt(idMap[staffIdStr] || staffIdStr);
+                                    let mappedStaffId = parseInt(idMap[staffIdStr] || staffIdStr);
+                                    if (roleName === 'completed') {
+                                        mappedStaffId = req.user.id;
+                                    }
                                     if (!isNaN(mappedStaffId)) {
                                         db.prepare(`
                                             INSERT INTO vehicle_assignments (work_date, station_id, vehicle_name, role_name, staff_id)
@@ -619,7 +622,10 @@ router.post('/confirm', verifyToken, requireRole('admin', 'sysadmin', 'chief'), 
                         for (const [vehicleName, rolesObj] of Object.entries(vehiclesObj)) {
                             for (const [roleName, staffIdStr] of Object.entries(rolesObj)) {
                                 if (staffIdStr) {
-                                    const mappedStaffId = parseInt(idMap[staffIdStr] || staffIdStr);
+                                    let mappedStaffId = parseInt(idMap[staffIdStr] || staffIdStr);
+                                    if (roleName === 'completed') {
+                                        mappedStaffId = req.user.id;
+                                    }
                                     if (!isNaN(mappedStaffId)) {
                                         db.prepare(`
                                             INSERT INTO vehicle_assignments (work_date, station_id, vehicle_name, role_name, staff_id)
@@ -730,6 +736,37 @@ router.post('/confirm', verifyToken, requireRole('admin', 'sysadmin', 'chief'), 
 
         confirmTx();
 
+        // 確定時点のデータを「確定履歴（バックアップ）」として下書きテーブルに自動保存する
+        try {
+            const name = `[確定履歴] ${new Date().toLocaleDateString('ja-JP')} (第${cycle_number}サイクル)`;
+            const createdAt = new Date().toISOString();
+            const vehicleData = {
+                deployedVehicles: deployedVehicles || [],
+                vehicleAssignments: vehicleAssignments || {}
+            };
+            db.prepare(`
+                INSERT INTO schedule_drafts (
+                    station_id, cycle_number, start_date, draft_name, created_at, created_by, created_by_name,
+                    roster_data, vehicle_data, hourly_leaves, staff_list, hope_shifts
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                parseInt(station_id, 10),
+                parseInt(cycle_number, 10),
+                start_date,
+                name,
+                createdAt,
+                req.user.id,
+                req.user.name || 'システム自動',
+                JSON.stringify(roster),
+                JSON.stringify(vehicleData),
+                JSON.stringify(hourlyLeaves || {}),
+                JSON.stringify(staffList || []),
+                JSON.stringify(req.body.hopeShifts || {})
+            );
+        } catch (backupErr) {
+            console.error('Failed to create confirm backup:', backupErr);
+        }
+
         // ログ記録
         db.prepare('INSERT INTO audit_logs (staff_id, action, details) VALUES (?, ?, ?)')
             .run(req.user.id, 'confirm_schedule', `勤務表確定完了: 署所ID=${station_id}, サイクル=${cycle_number}`);
@@ -741,13 +778,62 @@ router.post('/confirm', verifyToken, requireRole('admin', 'sysadmin', 'chief'), 
     }
 });
 
+/**
+ * @route   POST /api/schedule/unconfirm
+ * @desc    確定された勤務表の確定解除 (編集モードへ引き戻す)
+ */
+router.post('/unconfirm', verifyToken, requireRole('admin', 'sysadmin', 'chief'), (req, res) => {
+    const { station_id, start_date, cycle_number } = req.body;
+    if (!station_id || !start_date || !cycle_number) {
+        return res.status(400).json({ error: '必要なパラメータが不足しています。' });
+    }
+
+    try {
+        const cycleNum = parseInt(cycle_number) || 1;
+        const shiftedStartDateStr = getShiftedStartDateStr(start_date, cycleNum);
+        const shiftedEndDateStr = getEndDateStr(shiftedStartDateStr);
+
+        const unconfirmTx = db.transaction(() => {
+            // 1. 該当サイクルの schedule_entries の確定フラグを 0 にリセット
+            db.prepare(`
+                UPDATE schedule_entries 
+                SET is_confirmed = 0 
+                WHERE cycle_number = ? AND staff_id IN (
+                    SELECT id FROM staff WHERE station_id = ?
+                )
+            `).run(cycleNum, station_id);
+
+            // 2. 該当サイクルの自動生成された未打刻勤怠レコード (status = 'absent') を削除
+            db.prepare(`
+                DELETE FROM attendance_records 
+                WHERE work_date BETWEEN ? AND ? 
+                  AND status = 'absent'
+                  AND staff_id IN (
+                    SELECT id FROM staff WHERE station_id = ?
+                  )
+            `).run(shiftedStartDateStr, shiftedEndDateStr, station_id);
+        });
+
+        unconfirmTx();
+
+        // ログ記録
+        db.prepare('INSERT INTO audit_logs (staff_id, action, details) VALUES (?, ?, ?)')
+            .run(req.user.id, 'unconfirm_schedule', `勤務表確定解除: 署所ID=${station_id}, サイクル=${cycle_number}`);
+
+        res.json({ success: true, message: '勤務表の確定を解除し、編集モードに戻しました。' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: '確定の解除に失敗しました。' });
+    }
+});
+
 
 /**
  * @route   POST /api/schedule/drafts
  * @desc    下書き履歴への名前付き保存
  */
 router.post('/drafts', verifyToken, requireRole('admin', 'sysadmin', 'chief'), (req, res) => {
-    const { station_id, start_date, cycle_number, draft_name, roster, deployedVehicles, vehicleAssignments, hourlyLeaves, staffList } = req.body;
+    const { station_id, start_date, cycle_number, draft_name, roster, deployedVehicles, vehicleAssignments, hourlyLeaves, staffList, hopeShifts } = req.body;
 
     if (!station_id || !start_date || !cycle_number || !roster) {
         return res.status(400).json({ error: '必要なパラメータが不足しています。' });
@@ -768,8 +854,8 @@ router.post('/drafts', verifyToken, requireRole('admin', 'sysadmin', 'chief'), (
         const result = db.prepare(`
             INSERT INTO schedule_drafts (
                 station_id, cycle_number, start_date, draft_name, created_at, created_by, created_by_name,
-                roster_data, vehicle_data, hourly_leaves, staff_list
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                roster_data, vehicle_data, hourly_leaves, staff_list, hope_shifts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             parseInt(station_id, 10),
             parseInt(cycle_number, 10),
@@ -781,7 +867,8 @@ router.post('/drafts', verifyToken, requireRole('admin', 'sysadmin', 'chief'), (
             JSON.stringify(roster),
             JSON.stringify(vehicleData),
             JSON.stringify(hourlyLeaves || {}),
-            JSON.stringify(staffList || [])
+            JSON.stringify(staffList || []),
+            JSON.stringify(hopeShifts || {})
         );
 
         // ログ記録
@@ -856,7 +943,8 @@ router.get('/drafts/:id', verifyToken, requireRole('admin', 'sysadmin', 'chief')
                 deployedVehicles: (vehicleData && vehicleData.deployedVehicles) || [],
                 vehicleAssignments: (vehicleData && vehicleData.vehicleAssignments) || {},
                 hourlyLeaves: typeof draft.hourly_leaves === 'string' ? JSON.parse(draft.hourly_leaves) : draft.hourly_leaves,
-                staffList: typeof draft.staff_list === 'string' ? JSON.parse(draft.staff_list) : draft.staff_list
+                staffList: typeof draft.staff_list === 'string' ? JSON.parse(draft.staff_list) : draft.staff_list,
+                hopeShifts: typeof draft.hope_shifts === 'string' ? JSON.parse(draft.hope_shifts) : (draft.hope_shifts || {})
             }
         });
     } catch (err) {

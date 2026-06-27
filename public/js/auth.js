@@ -50,6 +50,7 @@ const Auth = {
 
             this.token = data.token;
             this.user = data.user;
+            this.syncUserStationName(); // マスタ署所名と同期
             authStorage.setItem('fire_dept_token', this.token);
             
             return data;
@@ -105,6 +106,7 @@ const Auth = {
             }
 
             this.user = data.user;
+            this.syncUserStationName(); // マスタ署所名と同期
             return true;
         } catch (err) {
             console.error('CheckAuth error:', err);
@@ -152,6 +154,37 @@ const Auth = {
     hasRole(...roles) {
         if (!this.user) return false;
         return roles.includes(this.user.role);
+    },
+
+    /**
+     * マスタ設定された署所情報とユーザーの所属情報を同期する
+     */
+    syncUserStationName() {
+        if (!this.user) return;
+        const stationsStr = window.safeStorage.getItem('master_stations');
+        if (!stationsStr) return;
+        try {
+            const stations = JSON.parse(stationsStr);
+            if (stations.length === 0) return;
+            
+            const flatStations = [];
+            stations.forEach((st, sIdx) => {
+                flatStations.push({ id: sIdx * 10 + 1, name: st.name });
+                if (st.sub_stations) {
+                    st.sub_stations.forEach((sub, subIdx) => {
+                        flatStations.push({ id: sIdx * 10 + 2 + subIdx, name: sub });
+                    });
+                }
+            });
+            
+            // 既存のユーザーの station_id に対応するマスタ内の名前を取得
+            const mappedStation = flatStations[this.user.station_id - 1];
+            if (mappedStation) {
+                this.user.station_name = mappedStation.name;
+            }
+        } catch (e) {
+            console.error('Failed to sync user station name with master settings:', e);
+        }
     }
 };
 

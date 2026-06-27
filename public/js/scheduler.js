@@ -879,120 +879,111 @@ function insertAnnualLeaves(roster, staffList, minStaffing = 11, minSubOfficer =
     const staffMap = {};
     staffList.forEach(s => { staffMap[s.id] = s; });
 
-    // 各日において余剰人員をチェックし、年休を挿入する
-    for (let d = 0; d < 28; d++) {
-        const activePlatoonNum = (d % 2 === 0) ? 1 : 2;
-        const activeStaffList = staffList.filter(s => s.platoon === activePlatoonNum);
-        
-        // その日の出勤者（「当」）をリストアップ
-        let dutyStaffIds = [];
-        let officersOnDuty = 0;
-        let subOfficersOnDuty = 0;
-        let largeOnDuty = 0;
-        let paramedicsOnDuty = 0;
-        let rescueOnDuty = 0;
+    // 年休取得上限 (maxCap) を 1日 から順に 4日 まで引き上げながら割り当てることで、
+    // 特定の人に偏らず、全員に平均して年休（有）が行き渡るように平準化する。
+    for (let maxCap = 1; maxCap <= 4; maxCap++) {
+        for (let d = 0; d < 28; d++) {
+            const activePlatoonNum = (d % 2 === 0) ? 1 : 2;
+            
+            // その日の出勤者（「当」）をリストアップ
+            let dutyStaffIds = [];
+            let officersOnDuty = 0;
+            let subOfficersOnDuty = 0;
+            let largeOnDuty = 0;
+            let paramedicsOnDuty = 0;
+            let rescueOnDuty = 0;
 
-        for (let staffId in roster) {
-            if (roster[staffId][d] === '当') {
-                const s = staffMap[staffId];
-                if (s && s.platoon === activePlatoonNum) {
-                    dutyStaffIds.push(staffId);
-                    if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) officersOnDuty++;
-                    if (["消防司令", "消防司令補"].includes(s.rank)) subOfficersOnDuty++;
-                    if (s.hasLargeLicense) largeOnDuty++;
-                    if (s.isParamedic) paramedicsOnDuty++;
-                    if (s.isRescue) rescueOnDuty++;
-                }
-            }
-        }
-
-        // 小隊内の総登録資格者数から、目標出勤人数を計算（validateRosterと同様）
-        const getPlatoonTarget = (platoonNum, prop) => {
-            const total = staffList.filter(s => s.platoon === platoonNum && s[prop]).length;
-            return Math.min(2, total);
-        };
-        const getPlatoonOfficerTarget = (platoonNum) => {
-            const total = staffList.filter(s => s.platoon === platoonNum && ["消防司令", "消防司令補", "消防士長"].includes(s.rank)).length;
-            return Math.min(2, total);
-        };
-        const getPlatoonSubOfficerTarget = (platoonNum, userMin = 1) => {
-            const total = staffList.filter(s => s.platoon === platoonNum && ["消防司令", "消防司令補"].includes(s.rank)).length;
-            return Math.min(userMin, total);
-        };
-
-        const targetOfficers = getPlatoonOfficerTarget(activePlatoonNum);
-        const targetSubOfficers = getPlatoonSubOfficerTarget(activePlatoonNum, minSubOfficer);
-        const targetLarge = getPlatoonTarget(activePlatoonNum, 'hasLargeLicense');
-        const targetParamedics = getPlatoonTarget(activePlatoonNum, 'isParamedic');
-        const targetRescue = (minRescue !== null && minRescue !== undefined && !isNaN(minRescue)) ? getPlatoonTarget(activePlatoonNum, 'isRescue', minRescue) : 0;
-
-        // 余剰があるか？（出勤人数 > 最低確保人員）
-        let currentDutyCount = dutyStaffIds.length;
-        
-        while (currentDutyCount > minStaffing) {
-            // 年休に変えても、その日の人員数および資格バランスが崩れない候補者を探す
-            let candidates = [];
-
-            for (let i = 0; i < dutyStaffIds.length; i++) {
-                const staffId = dutyStaffIds[i];
-                const s = staffMap[staffId];
-                if (!s) continue;
-
-                // その人が休んだ（年休になった）場合の、その日の仮の資格保有数を計算
-                let tempOfficers = officersOnDuty;
-                let tempSubOfficers = subOfficersOnDuty;
-                let tempLarge = largeOnDuty;
-                let tempParamedics = paramedicsOnDuty;
-                let tempRescue = rescueOnDuty;
-
-                if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) tempOfficers--;
-                if (["消防司令", "消防司令補"].includes(s.rank)) tempSubOfficers--;
-                if (s.hasLargeLicense) tempLarge--;
-                if (s.isParamedic) tempParamedics--;
-                if (s.isRescue) tempRescue--;
-
-                // 資格バランスが維持されるか？
-                const isOfficerSafe = tempOfficers >= targetOfficers;
-                const isSubOfficerSafe = tempSubOfficers >= targetSubOfficers;
-                const isLargeSafe = tempLarge >= targetLarge;
-                const isParamedicSafe = tempParamedics >= targetParamedics;
-                const isRescueSafe = (minRescue === null || minRescue === undefined || isNaN(minRescue)) || tempRescue >= targetRescue;
-
-                if (isOfficerSafe && isSubOfficerSafe && isLargeSafe && isParamedicSafe && isRescueSafe) {
-                    candidates.push(staffId);
-                }
-            }
-
-            if (candidates.length === 0) {
-                // 休ませられる候補者がいない場合はループを抜ける
-                break;
-            }
-
-            // 候補者の中で「この28日サイクル中で既に取得している年休（'有'）の数が最も少ない人」を優先する
-            let bestStaffId = null;
-            let minLeaves = 999;
-
-            for (let i = 0; i < candidates.length; i++) {
-                const staffId = candidates[i];
-                let leaveCount = 0;
-                for (let day = 0; day < 28; day++) {
-                    if (roster[staffId][day] === '有') {
-                        leaveCount++;
+            for (let staffId in roster) {
+                if (roster[staffId][d] === '当') {
+                    const s = staffMap[staffId];
+                    if (s && s.platoon === activePlatoonNum) {
+                        dutyStaffIds.push(staffId);
+                        if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) officersOnDuty++;
+                        if (["消防司令", "消防司令補"].includes(s.rank)) subOfficersOnDuty++;
+                        if (s.hasLargeLicense) largeOnDuty++;
+                        if (s.isParamedic) paramedicsOnDuty++;
+                        if (s.isRescue) rescueOnDuty++;
                     }
                 }
-                
-                if (leaveCount < minLeaves) {
-                    minLeaves = leaveCount;
-                    bestStaffId = staffId;
-                }
             }
 
-            if (bestStaffId) {
+            // 目標出勤人数
+            const getPlatoonTarget = (platoonNum, prop) => {
+                const total = staffList.filter(s => s.platoon === platoonNum && s[prop]).length;
+                return Math.min(2, total);
+            };
+            const getPlatoonOfficerTarget = (platoonNum) => {
+                const total = staffList.filter(s => s.platoon === platoonNum && ["消防司令", "消防司令補", "消防士長"].includes(s.rank)).length;
+                return Math.min(2, total);
+            };
+            const getPlatoonSubOfficerTarget = (platoonNum, userMin = 1) => {
+                const total = staffList.filter(s => s.platoon === platoonNum && ["消防司令", "消防司令補"].includes(s.rank)).length;
+                return Math.min(userMin, total);
+            };
+
+            const targetOfficers = getPlatoonOfficerTarget(activePlatoonNum);
+            const targetSubOfficers = getPlatoonSubOfficerTarget(activePlatoonNum, minSubOfficer);
+            const targetLarge = getPlatoonTarget(activePlatoonNum, 'hasLargeLicense');
+            const targetParamedics = getPlatoonTarget(activePlatoonNum, 'isParamedic');
+            const targetRescue = (minRescue !== null && minRescue !== undefined && !isNaN(minRescue)) ? getPlatoonTarget(activePlatoonNum, 'isRescue', minRescue) : 0;
+
+            let currentDutyCount = dutyStaffIds.length;
+            
+            while (currentDutyCount > minStaffing) {
+                let candidates = [];
+
+                for (let i = 0; i < dutyStaffIds.length; i++) {
+                    const staffId = dutyStaffIds[i];
+                    const s = staffMap[staffId];
+                    if (!s) continue;
+
+                    // その人が休んだ場合の資格数
+                    let tempOfficers = officersOnDuty;
+                    let tempSubOfficers = subOfficersOnDuty;
+                    let tempLarge = largeOnDuty;
+                    let tempParamedics = paramedicsOnDuty;
+                    let tempRescue = rescueOnDuty;
+
+                    if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) tempOfficers--;
+                    if (["消防司令", "消防司令補"].includes(s.rank)) tempSubOfficers--;
+                    if (s.hasLargeLicense) tempLarge--;
+                    if (s.isParamedic) tempParamedics--;
+                    if (s.isRescue) tempRescue--;
+
+                    // 資格バランス維持の確認
+                    const isOfficerSafe = tempOfficers >= targetOfficers;
+                    const isSubOfficerSafe = tempSubOfficers >= targetSubOfficers;
+                    const isLargeSafe = tempLarge >= targetLarge;
+                    const isParamedicSafe = tempParamedics >= targetParamedics;
+                    const isRescueSafe = (minRescue === null || minRescue === undefined || isNaN(minRescue)) || tempRescue >= targetRescue;
+
+                    if (isOfficerSafe && isSubOfficerSafe && isLargeSafe && isParamedicSafe && isRescueSafe) {
+                        // このサイクルですでに取得している年休数をカウント
+                        let leaveCount = 0;
+                        for (let day = 0; day < 28; day++) {
+                            if (roster[staffId][day] === '有') {
+                                leaveCount++;
+                            }
+                        }
+                        // 今回の上限（maxCap）未満である場合のみ候補とする
+                        if (leaveCount < maxCap) {
+                            candidates.push({ staffId, leaveCount });
+                        }
+                    }
+                }
+
+                if (candidates.length === 0) {
+                    break;
+                }
+
+                // 最も年休取得数が少ない人を優先
+                candidates.sort((a, b) => a.leaveCount - b.leaveCount);
+                const bestStaffId = candidates[0].staffId;
+
                 // その人のシフトを「有」に変更
-                roster[bestStaffId][d] = '食'; // ※ '有' を格納
                 roster[bestStaffId][d] = '有';
 
-                // その日のステータスを更新
+                // その日の出勤資格保有数を更新
                 const s = staffMap[bestStaffId];
                 if (["消防司令", "消防司令補", "消防士長"].includes(s.rank)) officersOnDuty--;
                 if (["消防司令", "消防司令補"].includes(s.rank)) subOfficersOnDuty--;
@@ -1002,8 +993,6 @@ function insertAnnualLeaves(roster, staffList, minStaffing = 11, minSubOfficer =
 
                 dutyStaffIds = dutyStaffIds.filter(id => id !== bestStaffId);
                 currentDutyCount--;
-            } else {
-                break;
             }
         }
     }

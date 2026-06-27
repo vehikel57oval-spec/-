@@ -44,12 +44,33 @@ const Portal = {
             // ダッシュボードへ遷移
             this.navigate('dashboard');
         } else {
-            // 消防本部リストをロード
-            try {
-                this.departments = await Auth.getDepartments();
-            } catch (err) {
-                console.error('Failed to load departments:', err);
+            // 安全ストレージからマスタ署所リストを読み込み、this.departments を構築
+            const stationsStr = window.safeStorage.getItem('master_stations');
+            let stations = [];
+            if (stationsStr) {
+                try { stations = JSON.parse(stationsStr); } catch (e) { stations = []; }
+            }
+
+            if (stations.length > 0) {
                 this.departments = [];
+                stations.forEach((st, sIdx) => {
+                    const code = `st_${sIdx + 1}`;
+                    this.departments.push({ code: code, name: st.name });
+                    if (st.sub_stations && Array.isArray(st.sub_stations)) {
+                        st.sub_stations.forEach((sub, subIdx) => {
+                            const subCode = `${code}_sub_${subIdx + 1}`;
+                            this.departments.push({ code: subCode, name: sub });
+                        });
+                    }
+                });
+            } else {
+                // 消防本部リストをロード
+                try {
+                    this.departments = await Auth.getDepartments();
+                } catch (err) {
+                    console.error('Failed to load departments:', err);
+                    this.departments = [];
+                }
             }
             this.renderLoginPage();
         }
@@ -69,14 +90,17 @@ const Portal = {
      */
     renderLoginPage() {
         const app = document.getElementById('app');
+        const hqName = window.safeStorage.getItem('master_hq_name') || '消防職場ポータル';
+        const systemIcon = window.safeStorage.getItem('master_system_icon') || '';
+
         app.innerHTML = `
             <div class="login-wrapper">
                 <div class="login-card">
                     <div class="login-header">
-                        <div class="login-logo">
-                            <i data-lucide="flame"></i>
+                        <div class="login-logo" style="${systemIcon ? 'background:none;' : ''}">
+                            ${systemIcon ? `<img src="${systemIcon}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 12px;">` : `<i data-lucide="flame"></i>`}
                         </div>
-                        <h1 class="login-title">消防職場ポータル</h1>
+                        <h1 class="login-title">${hqName}</h1>
                         <p class="login-subtitle">職員番号と4桁の暗証番号でログイン</p>
                     </div>
                     
@@ -111,6 +135,12 @@ const Portal = {
                         <button class="btn btn-primary" style="width: 100%;" type="submit">
                             ログイン <i data-lucide="log-in" style="width: 18px; height: 18px;"></i>
                         </button>
+                        
+                        <div style="margin-top: 16px; text-align: center; border-top: 1px solid var(--border-color); padding-top: 16px;">
+                            <button type="button" class="btn btn-secondary" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 13px;" onclick="Portal.renderMasterAdminPage()">
+                                <i data-lucide="settings-2" style="width: 16px; height: 16px;"></i> システムマスタ設定 (業者用)
+                            </button>
+                        </div>
                     </form>
                 </div>
             </div>
@@ -151,13 +181,18 @@ const Portal = {
      */
     renderPortalLayout() {
         const app = document.getElementById('app');
+        const hqName = window.safeStorage.getItem('master_hq_name') || '消防本部ポータル';
+        const systemIcon = window.safeStorage.getItem('master_system_icon') || '';
+
         app.innerHTML = `
             <div class="portal-layout">
                 <!-- サイドバー -->
                 <aside class="sidebar" id="sidebar">
-                    <div class="sidebar-brand">
-                        <div class="brand-icon">F</div>
-                        <span class="brand-text">消防本部ポータル</span>
+                    <div class="sidebar-brand" style="gap: 10px; align-items: center;">
+                        <div class="brand-icon" style="${systemIcon ? 'background:none;' : ''}">
+                            ${systemIcon ? `<img src="${systemIcon}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">` : 'F'}
+                        </div>
+                        <span class="brand-text" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${hqName}</span>
                     </div>
                     
                     <nav class="sidebar-menu" id="sidebar-menu">
@@ -598,23 +633,54 @@ const Portal = {
         });
         const data = await response.json();
         
-        const rowsHtml = data.staff.map(member => `
-            <tr>
-                <td>${member.employee_number}</td>
-                <td>${member.name}</td>
-                <td>${member.rank || '-'}</td>
-                <td><span class="staff-position-badge ${Portal.getPositionClass(member.position)}">${member.position || '-'}</span></td>
-                <td>${member.station_name}</td>
-                <td>${member.platoon === '1bu' ? 'A日 (1部)' : member.platoon === '2bu' ? 'B日 (2部)' : member.platoon === '3bu' ? 'C日 (3部)' : '日勤'}</td>
-                <td>${member.role === 'sysadmin' ? 'システム管理者' : member.role === 'admin' ? '本部管理者' : member.role === 'chief' ? '当直頭/署長' : '一般職員'}</td>
-                <td>${member.annual_leave_balance}日</td>
-                <td>
-                    ${Auth.hasRole('admin', 'sysadmin') ? `
-                        <button class="btn btn-primary" style="padding:6px 12px; font-size:12px; border-radius:6px;" onclick="Portal.openStaffEditModal(${JSON.stringify(member).replace(/"/g, '&quot;')})">編集</button>
-                    ` : '<span style="color:var(--text-muted)">閲覧のみ</span>'}
-                </td>
-            </tr>
-        `).join('');
+        // 署所マスタのマップ化
+        const stationsStr = window.safeStorage.getItem('master_stations');
+        let flatStationsMap = {};
+        if (stationsStr) {
+            try {
+                const stations = JSON.parse(stationsStr);
+                const flatStations = [];
+                stations.forEach((st, sIdx) => {
+                    flatStations.push({ id: sIdx * 10 + 1, name: st.name });
+                    if (st.sub_stations) {
+                        st.sub_stations.forEach((sub, subIdx) => {
+                            flatStations.push({ id: sIdx * 10 + 2 + subIdx, name: sub });
+                        });
+                    }
+                });
+                flatStations.forEach(fs => { flatStationsMap[fs.id] = fs.name; });
+            } catch (e) {}
+        }
+
+        // 小隊マスタの取得
+        const platoonsStr = window.safeStorage.getItem('master_platoon_names') || '第1小隊, 第2小隊';
+        const platoons = platoonsStr.split(',').map(p => p.trim());
+        
+        const rowsHtml = data.staff.map(member => {
+            const stationDisplayName = flatStationsMap[member.station_id] || member.station_name;
+            let platoonDisplayName = '日勤';
+            if (member.platoon === '1bu') platoonDisplayName = platoons[0] || '第1小隊';
+            else if (member.platoon === '2bu') platoonDisplayName = platoons[1] || '第2小隊';
+            else if (member.platoon === '3bu') platoonDisplayName = platoons[2] || '第3小隊';
+
+            return `
+                <tr>
+                    <td>${member.employee_number}</td>
+                    <td>${member.name}</td>
+                    <td>${member.rank || '-'}</td>
+                    <td><span class="staff-position-badge ${Portal.getPositionClass(member.position)}">${member.position || '-'}</span></td>
+                    <td>${stationDisplayName}</td>
+                    <td>${platoonDisplayName}</td>
+                    <td>${member.role === 'sysadmin' ? 'システム管理者' : member.role === 'admin' ? '本部管理者' : member.role === 'chief' ? '当直頭/署長' : '一般職員'}</td>
+                    <td>${member.annual_leave_balance}日</td>
+                    <td>
+                        ${Auth.hasRole('chief', 'admin', 'sysadmin') ? `
+                            <button class="btn btn-primary" style="padding:6px 12px; font-size:12px; border-radius:6px;" onclick="Portal.openStaffEditModal(${JSON.stringify(member).replace(/"/g, '&quot;')})">編集</button>
+                        ` : '<span style="color:var(--text-muted)">閲覧のみ</span>'}
+                    </td>
+                </tr>
+            `;
+        }).join('');
         
         container.innerHTML = `
             <div class="card">
@@ -623,17 +689,11 @@ const Portal = {
                         <h3>職員名簿管理</h3>
                         <p style="color:var(--text-secondary)">消防職員の所属、部区分、階級、隊、システム権限等のマスタ情報を管理します。</p>
                     </div>
-                    ${Auth.hasRole('admin', 'sysadmin') ? `
+                    ${Auth.hasRole('chief', 'admin', 'sysadmin') ? `
                         <div style="display:flex; gap:8px; margin-left:auto; align-items:center;">
-                            <div style="display:flex; align-items:center; gap:4px; background:rgba(255,255,255,0.02); border:1px solid var(--border-color); padding:4px 8px; border-radius:6px; font-size:12px;">
-                                <label style="font-weight:600; cursor:pointer;" for="csv-file-input">CSVインポート:</label>
-                                <input type="file" id="csv-file-input" accept=".csv" style="display:none;" onchange="Portal.handleCSVImport(event)">
-                                <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="document.getElementById('csv-file-input').click()">ファイル選択</button>
-                                <select id="csv-encoding" style="font-size:11px; padding:2px; background:transparent; border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
-                                    <option value="shift-jis">Shift_JIS (Excel)</option>
-                                    <option value="utf-8">UTF-8</option>
-                                </select>
-                            </div>
+                            <button class="btn btn-secondary" onclick="Portal.openCSVImportModal()" style="display:flex; align-items:center; gap:6px;">
+                                <i data-lucide="upload" style="width:16px;height:16px;"></i> CSV一括登録
+                            </button>
                             <button class="btn btn-primary" onclick="Portal.openStaffAddModal()">新規職員登録</button>
                         </div>
                     ` : ''}
@@ -677,13 +737,98 @@ const Portal = {
         }
     },
 
-    async handleCSVImport(event) {
+    openCSVImportModal() {
+        const content = `
+            <div style="display:flex; flex-direction:column; gap:16px; margin-top:12px;">
+                <div style="background:var(--primary-glow); padding:12px 16px; border-radius:var(--radius-sm); border:1px solid var(--primary-color); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <div style="font-size:13px; color:var(--text-secondary); line-height:1.5;">
+                        <strong>入力手順:</strong><br>
+                        1. テンプレートCSVをダウンロードします。<br>
+                        2. 項目に合わせて職員情報を入力し、CSVファイルとして保存します。<br>
+                        3. 文字コードを選択し、作成したCSVファイルをアップロードしてください。
+                    </div>
+                    <button class="btn btn-primary" style="padding:8px 16px; font-size:12px;" onclick="Portal.downloadCSVTemplate()">
+                        <i data-lucide="download" style="width:14px;height:14px;"></i> テンプレートを保存
+                    </button>
+                </div>
+                
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <div class="form-group" style="flex:1; min-width:200px;">
+                        <label class="form-label" style="font-size:11px;">文字コード (Excelで編集した場合は Shift_JIS)</label>
+                        <select id="csv-modal-encoding" class="form-input" style="padding-left:12px; height:36px; font-size:13px;">
+                            <option value="shift-jis">Shift_JIS (Excel形式)</option>
+                            <option value="utf-8">UTF-8 (標準テキスト形式)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1.2; min-width:240px; justify-content:flex-end; display:flex;">
+                        <input type="file" id="csv-modal-file-input" accept=".csv" style="display:none;" onchange="Portal.handleCSVModalFile(event)">
+                        <button class="btn btn-secondary" style="width:100%; height:36px; display:flex; justify-content:center; align-items:center; gap:6px; font-size:13px;" onclick="document.getElementById('csv-modal-file-input').click()">
+                            <i data-lucide="file-spreadsheet" style="width:16px;height:16px;"></i> CSVファイルを選択
+                        </button>
+                    </div>
+                </div>
+
+                <!-- プレビュー表エリア -->
+                <div id="csv-preview-container" style="display:none; flex-direction:column; gap:10px;">
+                    <h4 style="font-size:14px; border-bottom:1px solid var(--border-color); padding-bottom:6px; margin: 12px 0 0 0;">取り込みデータプレビュー</h4>
+                    <div class="table-responsive" style="max-height:280px; overflow-y:auto; border:1px solid var(--border-color); border-radius:6px;">
+                        <table class="table" style="font-size:12px; width:100%;">
+                            <thead>
+                                <tr>
+                                    <th>状態</th>
+                                    <th>職員番号</th>
+                                    <th>氏名</th>
+                                    <th>所属署所ID</th>
+                                    <th>勤務区分</th>
+                                    <th>階級</th>
+                                    <th>システム役割</th>
+                                    <th>エラー内容</th>
+                                </tr>
+                            </thead>
+                            <tbody id="csv-preview-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div style="font-size:11px; color:var(--text-secondary); display:flex; gap:16px;" id="csv-preview-stats">
+                        <span>新規登録: <strong id="csv-preview-stat-new" style="color:var(--success);">0</strong>件</span>
+                        <span>更新・上書き: <strong id="csv-preview-stat-update" style="color:var(--warning);">0</strong>件</span>
+                        <span>エラー: <strong id="csv-preview-stat-error" style="color:var(--danger);">0</strong>件</span>
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:12px; justify-content:flex-end; border-top:1px solid var(--border-color); padding-top:16px; margin-top:8px;">
+                    <button id="btn-csv-import-submit" class="btn btn-primary" style="padding:8px 24px; font-size:13px;" disabled onclick="Portal.executeCSVImport()">
+                        一括登録を実行する
+                    </button>
+                    <button class="btn btn-secondary" style="padding:8px 20px; font-size:13px;" onclick="Portal.closeModal()">
+                        キャンセル
+                    </button>
+                </div>
+            </div>
+        `;
+        Portal.showModal('CSV職員情報一括登録', content, { maxWidth: '780px' });
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    },
+
+    downloadCSVTemplate() {
+        const headers = '職員番号,氏名,勤務区分,階級,役職,大型免許,救命士,救助員,機関員,日勤,システム役割,年休残日数,所属署所ID\r\n';
+        const sampleRow = '1001,消防 太郎,1bu,消防士長,消防隊,1,1,0,1,0,user,20.0,1\r\n';
+        const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+        const blob = new Blob([bom, headers + sampleRow], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.setAttribute('download', '消防職員インポートテンプレート.csv');
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    },
+
+    async handleCSVModalFile(event) {
         const file = event.target.files[0];
         if (!file) return;
-        
-        const encoding = document.getElementById('csv-encoding').value;
+        const encoding = document.getElementById('csv-modal-encoding').value;
         const reader = new FileReader();
-        
         reader.onload = async (e) => {
             const text = e.target.result;
             try {
@@ -692,41 +837,23 @@ const Portal = {
                     Portal.showToast('CSVデータが空か、解析に失敗しました。', 'error');
                     return;
                 }
-                
-                const confirmed = confirm(`CSVから ${staffList.length} 件の職員データをインポートしますか？\n（既存の職員番号は上書き更新されます）`);
-                if (!confirmed) {
-                    event.target.value = '';
-                    return;
-                }
-                
-                const response = await fetch('/api/admin/staff/import', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${Auth.token}`
-                    },
-                    body: JSON.stringify({ staffList })
+                const response = await fetch('/api/admin/staff', {
+                    headers: { 'Authorization': `Bearer ${Auth.token}` }
                 });
-                
-                const data = await response.json();
-                if (response.ok) {
-                    Portal.showToast(data.message, 'success');
-                    Portal.navigate('staff_admin');
-                } else {
-                    Portal.showToast(data.error || 'インポートに失敗しました。', 'error');
+                const staffData = await response.json();
+                const existingMap = {};
+                if (staffData && staffData.staff) {
+                    staffData.staff.forEach(s => {
+                        existingMap[s.employee_number.toString()] = s;
+                    });
                 }
+                Portal.renderCSVPreview(staffList, existingMap);
             } catch (err) {
                 console.error(err);
                 Portal.showToast(err.message || 'CSVの解析に失敗しました。', 'error');
             }
             event.target.value = '';
         };
-        
-        reader.onerror = () => {
-            Portal.showToast('ファイルの読み込みに失敗しました。', 'error');
-            event.target.value = '';
-        };
-        
         if (encoding === 'shift-jis') {
             reader.readAsText(file, 'Shift_JIS');
         } else {
@@ -734,12 +861,117 @@ const Portal = {
         }
     },
 
+    renderCSVPreview(staffList, existingMap) {
+        const tbody = document.getElementById('csv-preview-tbody');
+        const container = document.getElementById('csv-preview-container');
+        const btnSubmit = document.getElementById('btn-csv-import-submit');
+        if (!tbody || !container || !btnSubmit) return;
+        
+        tbody.innerHTML = '';
+        let newCount = 0;
+        let updateCount = 0;
+        let errorCount = 0;
+        const validPlatoons = ['1bu', '2bu', '3bu', 'nikkin'];
+        const validRoles = ['staff', 'chief', 'admin', 'sysadmin', 'user'];
+
+        Portal.parsedCSVList = staffList;
+        
+        staffList.forEach(s => {
+            let rowClass = '';
+            let statusBadge = '';
+            let errors = [];
+            
+            if (!s.employee_number) errors.push('職員番号が未入力です');
+            if (!s.name) errors.push('氏名が未入力です');
+            if (!s.platoon) errors.push('勤務区分が未入力です');
+            else if (!validPlatoons.includes(s.platoon)) errors.push(`無効な勤務区分: ${s.platoon} (1bu/2bu/3bu/nikkin)`);
+            if (!s.role) errors.push('システム役割が未入力です');
+            else if (!validRoles.includes(s.role)) errors.push(`無効な役割: ${s.role} (staff/chief/admin/sysadmin)`);
+            if (isNaN(s.station_id) || s.station_id <= 0) errors.push('無効な所属署所ID');
+
+            if (errors.length > 0) {
+                rowClass = 'style="background:rgba(239,68,68,0.08); color:var(--danger);"';
+                statusBadge = '<span class="badge" style="background:var(--danger); color:#fff; font-size:10px; padding:2px 6px;">エラー</span>';
+                errorCount++;
+            } else {
+                const existing = existingMap[s.employee_number.toString()];
+                if (existing) {
+                    rowClass = 'style="background:rgba(245,158,11,0.05);"';
+                    statusBadge = '<span class="badge" style="background:var(--warning); color:#fff; font-size:10px; padding:2px 6px;">更新</span>';
+                    updateCount++;
+                } else {
+                    rowClass = 'style="background:rgba(16,185,129,0.05);"';
+                    statusBadge = '<span class="badge" style="background:var(--success); color:#fff; font-size:10px; padding:2px 6px;">新規</span>';
+                    newCount++;
+                }
+            }
+            
+            const platoonLabel = s.platoon === '1bu' ? 'A日(1部)' : s.platoon === '2bu' ? 'B日(2部)' : s.platoon === '3bu' ? 'C日(3部)' : '日勤';
+            const roleLabel = s.role === 'sysadmin' ? '管理者(システム)' : s.role === 'admin' ? '管理者(本部)' : s.role === 'chief' ? '当直頭/署長' : '一般職員';
+            
+            tbody.innerHTML += `
+                <tr ${rowClass}>
+                    <td style="text-align:center; padding:6px 8px;">${statusBadge}</td>
+                    <td style="padding:6px 8px;"><strong>${s.employee_number || '-'}</strong></td>
+                    <td style="padding:6px 8px;">${s.name || '-'}</td>
+                    <td style="padding:6px 8px; text-align:center;">${s.station_id || '-'}</td>
+                    <td style="padding:6px 8px;">${platoonLabel}</td>
+                    <td style="padding:6px 8px;">${s.rank || '-'}</td>
+                    <td style="padding:6px 8px;">${roleLabel}</td>
+                    <td style="padding:6px 8px; font-weight:600; color:var(--danger);">${errors.join(', ')}</td>
+                </tr>
+            `;
+        });
+        
+        document.getElementById('csv-preview-stat-new').textContent = newCount;
+        document.getElementById('csv-preview-stat-update').textContent = updateCount;
+        document.getElementById('csv-preview-stat-error').textContent = errorCount;
+        container.style.display = 'flex';
+        btnSubmit.disabled = errorCount > 0 || staffList.length === 0;
+    },
+
+    async executeCSVImport() {
+        if (!Portal.parsedCSVList || Portal.parsedCSVList.length === 0) return;
+        const btnSubmit = document.getElementById('btn-csv-import-submit');
+        if (btnSubmit) {
+            btnSubmit.disabled = true;
+            btnSubmit.textContent = '登録中...';
+        }
+        try {
+            const response = await fetch('/api/admin/staff/import', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Auth.token}`
+                },
+                body: JSON.stringify({ staffList: Portal.parsedCSVList })
+            });
+            const data = await response.json();
+            if (response.ok) {
+                Portal.showToast(data.message, 'success');
+                Portal.closeModal();
+                Portal.navigate('staff_admin');
+            } else {
+                Portal.showToast(data.error || 'インポートに失敗しました。', 'error');
+                if (btnSubmit) {
+                    btnSubmit.disabled = false;
+                    btnSubmit.textContent = '一括登録を実行する';
+                }
+            }
+        } catch (err) {
+            console.error(err);
+            Portal.showToast('通信エラーが発生しました。', 'error');
+            if (btnSubmit) {
+                btnSubmit.disabled = false;
+                btnSubmit.textContent = '一括登録を実行する';
+            }
+        }
+    },
+
     parseCSV(text) {
         const lines = text.split(/\r?\n/);
         if (lines.length < 2) return [];
-        
         const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
-        
         const fieldMapping = {
             'employee_number': ['職員番号', 'employee_number'],
             'name': ['氏名', 'name'],
@@ -773,7 +1005,6 @@ const Portal = {
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
-            
             const values = [];
             let currentVal = '';
             let inQuotes = false;
@@ -789,10 +1020,7 @@ const Portal = {
                 }
             }
             values.push(currentVal.trim());
-
-            if (values.length < headers.length) {
-                continue;
-            }
+            if (values.length < headers.length) continue;
 
             const getVal = (key, defaultVal = '') => {
                 const idx = headerIndices[key];
@@ -814,36 +1042,67 @@ const Portal = {
             const annual_leave_balance = parseFloat(getVal('annual_leave_balance', '20.0'));
             const station_id = parseInt(getVal('station_id'));
 
-            if (platoon === '1部' || platoon === '第1小隊') platoon = '1bu';
-            else if (platoon === '2部' || platoon === '第2小隊') platoon = '2bu';
-            else if (platoon === '3部' || platoon === '第3小隊') platoon = '3bu';
-            else if (platoon === '日勤者') platoon = 'nikkin';
+            if (platoon === '1部' || platoon === '第1小隊' || platoon === '1bu') platoon = '1bu';
+            else if (platoon === '2部' || platoon === '第2小隊' || platoon === '2bu') platoon = '2bu';
+            else if (platoon === '3部' || platoon === '第3小隊' || platoon === '3bu') platoon = '3bu';
+            else if (platoon === '日勤者' || platoon === '日勤' || platoon === 'nikkin') platoon = 'nikkin';
 
-            if (role === '一般職員' || role === '一般') role = 'staff';
-            else if (role === '当直頭' || role === '署長') role = 'chief';
-            else if (role === '本部管理者' || role === '管理者') role = 'admin';
-            else if (role === 'システム管理者') role = 'sysadmin';
+            if (role === '一般職員' || role === '一般' || role === 'staff') role = 'staff';
+            else if (role === '当直頭' || role === '署長' || role === 'chief') role = 'chief';
+            else if (role === '本部管理者' || role === '管理者' || role === 'admin') role = 'admin';
+            else if (role === 'システム管理者' || role === 'sysadmin') role = 'sysadmin';
+            else if (role === 'user') role = 'staff';
 
             staffList.push({
-                employee_number,
-                name,
-                platoon,
-                rank,
-                position,
-                has_large_license,
-                is_paramedic,
-                is_rescue,
-                is_kikan,
-                is_day_worker,
-                role,
-                annual_leave_balance,
-                station_id
+                employee_number, name, platoon, rank, position,
+                has_large_license, is_paramedic, is_rescue, is_kikan,
+                is_day_worker, role, annual_leave_balance, station_id
             });
         }
         return staffList;
     },
 
     openStaffAddModal() {
+        // 署所マスタのロードと平坦化
+        const stationsStr = window.safeStorage.getItem('master_stations');
+        let stations = [];
+        if (stationsStr) {
+            try { stations = JSON.parse(stationsStr); } catch (e) { stations = []; }
+        }
+        if (stations.length === 0) {
+            stations = [
+                { name: "指宿消防署", sub_stations: ["山川分遣所", "開聞分遣所"] },
+                { name: "南薩分署", sub_stations: ["喜入分遣所"] }
+            ];
+        }
+        const flatStations = [];
+        stations.forEach((st, sIdx) => {
+            flatStations.push({ id: sIdx * 10 + 1, name: st.name });
+            if (st.sub_stations) {
+                st.sub_stations.forEach((sub, subIdx) => {
+                    flatStations.push({ id: sIdx * 10 + 2 + subIdx, name: sub });
+                });
+            }
+        });
+        const stationOptions = flatStations.map(fs => `<option value="${fs.id}">${fs.name}</option>`).join('');
+
+        // 小隊・勤務形態マスタのロード
+        const platoonsStr = window.safeStorage.getItem('master_platoon_names') || '第1小隊, 第2小隊';
+        const platoons = platoonsStr.split(',').map(p => p.trim());
+        const shiftTypesStr = window.safeStorage.getItem('master_shift_types') || '日勤, 2部';
+        const shiftTypes = shiftTypesStr.split(',').map(s => s.trim());
+
+        let platoonOptions = '';
+        if (platoons[0]) platoonOptions += `<option value="1bu">${platoons[0]} (A日)</option>`;
+        if (platoons[1]) platoonOptions += `<option value="2bu">${platoons[1]} (B日)</option>`;
+        if (shiftTypes.includes('3部')) {
+            const label3 = platoons[2] || '第3小隊';
+            platoonOptions += `<option value="3bu">${label3} (C日)</option>`;
+        }
+        if (shiftTypes.includes('日勤')) {
+            platoonOptions += `<option value="nikkin">日勤</option>`;
+        }
+
         const content = `
             <form id="staff-form" onsubmit="Portal.handleStaffSubmit(event, 'add')">
                 <div class="form-group" style="margin-bottom:12px;">
@@ -861,18 +1120,13 @@ const Portal = {
                 <div class="form-group" style="margin-bottom:12px;">
                     <label class="form-label">所属署所</label>
                     <select class="form-input" style="padding-left:12px;" id="member-station_id" required>
-                        <option value="1">指宿消防署（本署）</option>
-                        <option value="2">山川分遣所（北署）</option>
-                        <option value="3">開聞分遣所（南署）</option>
+                        ${stationOptions}
                     </select>
                 </div>
                 <div class="form-group" style="margin-bottom:12px;">
                     <label class="form-label">部区分 (サイクル判定)</label>
                     <select class="form-input" style="padding-left:12px;" id="member-platoon" required>
-                        <option value="1bu">1部 (A日)</option>
-                        <option value="2bu">2部 (B日)</option>
-                        <option value="3bu">3部 (C日)</option>
-                        <option value="nikkin">日勤</option>
+                        ${platoonOptions}
                     </select>
                 </div>
                 <div class="form-group" style="margin-bottom:12px;">
@@ -937,6 +1191,46 @@ const Portal = {
     },
 
     openStaffEditModal(member) {
+        // 署所マスタのロードと平坦化
+        const stationsStr = window.safeStorage.getItem('master_stations');
+        let stations = [];
+        if (stationsStr) {
+            try { stations = JSON.parse(stationsStr); } catch (e) { stations = []; }
+        }
+        if (stations.length === 0) {
+            stations = [
+                { name: "指宿消防署", sub_stations: ["山川分遣所", "開聞分遣所"] },
+                { name: "南薩分署", sub_stations: ["喜入分遣所"] }
+            ];
+        }
+        const flatStations = [];
+        stations.forEach((st, sIdx) => {
+            flatStations.push({ id: sIdx * 10 + 1, name: st.name });
+            if (st.sub_stations) {
+                st.sub_stations.forEach((sub, subIdx) => {
+                    flatStations.push({ id: sIdx * 10 + 2 + subIdx, name: sub });
+                });
+            }
+        });
+        const stationOptions = flatStations.map(fs => `<option value="${fs.id}" ${member.station_id === fs.id ? 'selected' : ''}>${fs.name}</option>`).join('');
+
+        // 小隊・勤務形態マスタのロード
+        const platoonsStr = window.safeStorage.getItem('master_platoon_names') || '第1小隊, 第2小隊';
+        const platoons = platoonsStr.split(',').map(p => p.trim());
+        const shiftTypesStr = window.safeStorage.getItem('master_shift_types') || '日勤, 2部';
+        const shiftTypes = shiftTypesStr.split(',').map(s => s.trim());
+
+        let platoonOptions = '';
+        if (platoons[0]) platoonOptions += `<option value="1bu" ${member.platoon === '1bu' ? 'selected' : ''}>${platoons[0]} (A日)</option>`;
+        if (platoons[1]) platoonOptions += `<option value="2bu" ${member.platoon === '2bu' ? 'selected' : ''}>${platoons[1]} (B日)</option>`;
+        if (shiftTypes.includes('3部')) {
+            const label3 = platoons[2] || '第3小隊';
+            platoonOptions += `<option value="3bu" ${member.platoon === '3bu' ? 'selected' : ''}>${label3} (C日)</option>`;
+        }
+        if (shiftTypes.includes('日勤')) {
+            platoonOptions += `<option value="nikkin" ${member.platoon === 'nikkin' ? 'selected' : ''}>日勤</option>`;
+        }
+
         const content = `
             <form id="staff-form" onsubmit="Portal.handleStaffSubmit(event, 'edit', ${member.id})">
                 <div class="form-group" style="margin-bottom:12px;">
@@ -954,18 +1248,13 @@ const Portal = {
                 <div class="form-group" style="margin-bottom:12px;">
                     <label class="form-label">所属署所</label>
                     <select class="form-input" style="padding-left:12px;" id="member-station_id" required>
-                        <option value="1" ${member.station_id === 1 ? 'selected' : ''}>指宿消防署（本署）</option>
-                        <option value="2" ${member.station_id === 2 ? 'selected' : ''}>山川分遣所（北署）</option>
-                        <option value="3" ${member.station_id === 3 ? 'selected' : ''}>開聞分遣所（南署）</option>
+                        ${stationOptions}
                     </select>
                 </div>
                 <div class="form-group" style="margin-bottom:12px;">
                     <label class="form-label">部区分</label>
                     <select class="form-input" style="padding-left:12px;" id="member-platoon" required>
-                        <option value="1bu" ${member.platoon === '1bu' ? 'selected' : ''}>1部 (A日)</option>
-                        <option value="2bu" ${member.platoon === '2bu' ? 'selected' : ''}>2部 (B日)</option>
-                        <option value="3bu" ${member.platoon === '3bu' ? 'selected' : ''}>3部 (C日)</option>
-                        <option value="nikkin" ${member.platoon === 'nikkin' ? 'selected' : ''}>日勤</option>
+                        ${platoonOptions}
                     </select>
                 </div>
                 <div class="form-group" style="margin-bottom:12px;">
@@ -1200,6 +1489,253 @@ const Portal = {
         } catch (err) {
             this.showToast('通信エラーが発生しました。', 'error');
         }
+    },
+
+    /**
+     * システムマスタ管理初期設定画面 (業者用) の描画
+     */
+    renderMasterAdminPage() {
+        const app = document.getElementById('app');
+        
+        // 既存データの読み込み (localStorage / safeStorage)
+        const hqName = window.safeStorage.getItem('master_hq_name') || '指宿消防署';
+        const platoons = window.safeStorage.getItem('master_platoon_names') || '第1小隊, 第2小隊';
+        const shiftTypesStr = window.safeStorage.getItem('master_shift_types') || '2部';
+        const systemIcon = window.safeStorage.getItem('master_system_icon') || '';
+        const stationsStr = window.safeStorage.getItem('master_stations');
+        
+        const shiftTypes = shiftTypesStr.split(',').map(s => s.trim());
+        
+        let stations = [];
+        if (stationsStr) {
+            try { stations = JSON.parse(stationsStr); } catch (e) { stations = []; }
+        }
+        if (stations.length === 0) {
+            stations = [
+                { name: "指宿消防署", sub_stations: ["山川分遣所", "開聞分遣所"] },
+                { name: "南薩分署", sub_stations: ["喜入分遣所"] }
+            ];
+        }
+        
+        app.innerHTML = `
+            <div class="login-wrapper" style="min-height: 100vh; padding: 40px 20px; display: flex; justify-content: center; align-items: center; background: radial-gradient(circle at 50% 50%, #1e293b 0%, #0f172a 100%);">
+                <div class="login-card" style="max-width: 650px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.05); background: rgba(30, 41, 59, 0.8); backdrop-filter: blur(16px); border-radius: 16px; margin: 20px 0;">
+                    <div class="login-header">
+                        <div class="login-logo" style="background: linear-gradient(135deg, #f59e0b, #ef4444); margin: 0 auto 16px auto; width: 64px; height: 64px; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: white;">
+                            <i data-lucide="settings" style="width: 32px; height: 32px;"></i>
+                        </div>
+                        <h1 class="login-title" style="color: #f8fafc; font-size: 24px; font-weight: 700;">システムマスタ管理初期設定</h1>
+                        <p class="login-subtitle" style="color: #94a3b8; font-size: 13px;">本システムを導入する導入業者向けの初期パラメータ設定画面です</p>
+                    </div>
+                    
+                    <form id="master-admin-form" style="display: flex; flex-direction: column; gap: 20px; text-align: left; margin-top: 24px;">
+                        <div class="form-group">
+                            <label class="form-label" style="font-weight: 600; color: #cbd5e1; font-size: 13px; margin-bottom: 8px; display: block;">① 消防本部名</label>
+                            <input class="form-input" type="text" id="master-hq-name" required value="${hqName}" placeholder="例: 指宿消防署" style="background: rgba(15, 23, 42, 0.6); border-color: rgba(255, 255, 255, 0.1); color: #f1f5f9; padding: 10px 14px; border-radius: 8px;">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" style="font-weight: 600; color: #cbd5e1; font-size: 13px; margin-bottom: 8px; display: block;">② 小隊名 (カンマ区切りで入力)</label>
+                            <input class="form-input" type="text" id="master-platoons" required value="${platoons}" placeholder="例: 第1小隊, 第2小隊, 日勤隊" style="background: rgba(15, 23, 42, 0.6); border-color: rgba(255, 255, 255, 0.1); color: #f1f5f9; padding: 10px 14px; border-radius: 8px;">
+                            <span style="font-size: 11px; color: #94a3b8; margin-top: 6px; display: block; line-height: 1.4;">※ カンマ（,）で区切って複数登録できます。小隊別フィルタなどで利用されます。</span>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" style="font-weight: 600; color: #cbd5e1; font-size: 13px; margin-bottom: 8px; display: block;">③ 勤務形態 (複数選択可)</label>
+                            <div style="display: flex; gap: 24px; margin-top: 8px; background: rgba(15, 23, 42, 0.4); padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #e2e8f0; font-size: 14px; font-weight: 500;">
+                                    <input type="checkbox" name="master-shifts" value="日勤" ${shiftTypes.includes('日勤') ? 'checked' : ''} style="accent-color: #ef4444; width: 16px; height: 16px;"> 日勤
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #e2e8f0; font-size: 14px; font-weight: 500;">
+                                    <input type="checkbox" name="master-shifts" value="2部" ${shiftTypes.includes('2部') ? 'checked' : ''} style="accent-color: #ef4444; width: 16px; height: 16px;"> 2部当直
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #e2e8f0; font-size: 14px; font-weight: 500;">
+                                    <input type="checkbox" name="master-shifts" value="3部" ${shiftTypes.includes('3部') ? 'checked' : ''} style="accent-color: #ef4444; width: 16px; height: 16px;"> 3部当直
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label" style="font-weight: 600; color: #cbd5e1; font-size: 13px; margin-bottom: 8px; display: block;">⑤ 署所構成 (署の配下に所がある構成)</label>
+                            <div id="master-stations-container" style="display: flex; flex-direction: column; gap: 16px; margin-top: 8px;">
+                                <!-- 動的レンダリング -->
+                            </div>
+                            <button type="button" class="btn" id="add-hq-station-btn" style="margin-top: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #e2e8f0; font-size: 12px; padding: 6px 12px; display: flex; align-items: center; gap: 6px; cursor: pointer; border-radius: 6px;">
+                                <i data-lucide="plus" style="width: 14px; height: 14px;"></i> 署を追加する
+                            </button>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" style="font-weight: 600; color: #cbd5e1; font-size: 13px; margin-bottom: 8px; display: block;">④ システム用アイコン画像 (実装検証用)</label>
+                            <div style="display: flex; align-items: center; gap: 20px; margin-top: 8px; background: rgba(15, 23, 42, 0.4); padding: 16px; border-radius: 8px; border: 1px dashed rgba(255, 255, 255, 0.15);">
+                                <div id="icon-preview-container" style="width: 64px; height: 64px; border-radius: 12px; background: #334155; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 2px solid #ef4444; flex-shrink: 0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                                    ${systemIcon ? `<img src="${systemIcon}" id="master-icon-img" style="width: 100%; height: 100%; object-fit: cover;">` : `<i data-lucide="image" id="master-icon-placeholder" style="width: 28px; height: 28px; color: #94a3b8;"></i>`}
+                                </div>
+                                <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 6px;">
+                                    <input type="file" id="master-icon-file" accept="image/*" style="font-size: 12px; color: #cbd5e1;">
+                                    <span style="font-size: 11px; color: #94a3b8; display: block; line-height: 1.4;">※ 画像をアップロードするとリアルタイムでBase64データとして保存され、復元可能です。</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="display: flex; gap: 12px; margin-top: 16px;">
+                            <button type="button" class="btn btn-secondary" style="flex: 1; padding: 12px; border-radius: 8px; font-weight: 500; font-size: 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #cbd5e1;" onclick="Portal.renderLoginPage()">
+                                ログイン画面に戻る
+                            </button>
+                            <button type="submit" class="btn btn-primary" style="flex: 1; padding: 12px; border-radius: 8px; font-weight: 600; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(135deg, #f59e0b, #ef4444); border: none; color: white;">
+                                <i data-lucide="save" style="width: 18px; height: 18px;"></i> 設定を保存
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+        
+        const renderStationsList = () => {
+            const container = document.getElementById('master-stations-container');
+            container.innerHTML = stations.map((st, sIdx) => `
+                <div class="station-block" data-idx="${sIdx}" style="background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255,255,255,0.08); padding: 16px; border-radius: 8px; position: relative;">
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 12px;">
+                        <span style="font-size: 11px; background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: 600;">署</span>
+                        <input type="text" class="station-name-input form-input" value="${st.name}" placeholder="例: 指宿消防署" style="background: rgba(15, 23, 42, 0.6); border-color: rgba(255, 255, 255, 0.1); color: #f1f5f9; padding: 6px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; flex-grow: 1;">
+                        <button type="button" class="delete-station-btn" data-idx="${sIdx}" style="background: none; border: none; color: #ef4444; cursor: pointer; padding: 4px;" title="この署と配下の所を削除">
+                            <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+                        </button>
+                    </div>
+                    <div class="sub-stations-list" style="margin-left: 24px; display: flex; flex-direction: column; gap: 8px; border-left: 2px dashed rgba(255,255,255,0.1); padding-left: 16px;">
+                        ${st.sub_stations.map((sub, subIdx) => `
+                            <div class="sub-station-item" data-sub-idx="${subIdx}" style="display: flex; gap: 10px; align-items: center;">
+                                <span style="font-size: 10px; background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-weight: 600;">所</span>
+                                <input type="text" class="sub-station-name-input form-input" value="${sub}" placeholder="例: 山川分遣所" style="background: rgba(15, 23, 42, 0.6); border-color: rgba(255, 255, 255, 0.1); color: #f1f5f9; padding: 4px 8px; border-radius: 6px; font-size: 12px; flex-grow: 1;">
+                                <button type="button" class="delete-sub-station-btn" data-idx="${sIdx}" data-sub-idx="${subIdx}" style="background: none; border: none; color: #ef4444; cursor: pointer; padding: 4px;" title="この所を削除">
+                                    <i data-lucide="x" style="width: 14px; height: 14px;"></i>
+                                </button>
+                            </div>
+                        `).join('')}
+                        <button type="button" class="add-sub-station-btn" data-idx="${sIdx}" style="background: none; border: 1px dashed rgba(255,255,255,0.15); color: #94a3b8; cursor: pointer; padding: 4px 8px; border-radius: 6px; font-size: 11px; display: flex; align-items: center; gap: 4px; align-self: flex-start; margin-top: 4px;">
+                            <i data-lucide="plus" style="width: 12px; height: 12px;"></i> 所を追加
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+            bindStationEvents();
+        };
+
+        const bindStationEvents = () => {
+            document.querySelectorAll('.station-name-input').forEach(input => {
+                input.addEventListener('change', (e) => {
+                    const idx = parseInt(e.target.closest('.station-block').dataset.idx);
+                    stations[idx].name = e.target.value.trim();
+                });
+            });
+
+            document.querySelectorAll('.sub-station-name-input').forEach(input => {
+                input.addEventListener('change', (e) => {
+                    const block = e.target.closest('.station-block');
+                    const item = e.target.closest('.sub-station-item');
+                    const idx = parseInt(block.dataset.idx);
+                    const subIdx = parseInt(item.dataset.subIdx);
+                    stations[idx].sub_stations[subIdx] = e.target.value.trim();
+                });
+            });
+
+            document.querySelectorAll('.delete-station-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const idx = parseInt(btn.dataset.idx);
+                    stations.splice(idx, 1);
+                    renderStationsList();
+                });
+            });
+
+            document.querySelectorAll('.delete-sub-station-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const idx = parseInt(btn.dataset.idx);
+                    const subIdx = parseInt(btn.dataset.subIdx);
+                    stations[idx].sub_stations.splice(subIdx, 1);
+                    renderStationsList();
+                });
+            });
+
+            document.querySelectorAll('.add-sub-station-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const idx = parseInt(btn.dataset.idx);
+                    stations[idx].sub_stations.push('');
+                    renderStationsList();
+                });
+            });
+        };
+
+        // 署の追加
+        document.getElementById('add-hq-station-btn').addEventListener('click', () => {
+            stations.push({ name: '', sub_stations: [] });
+            renderStationsList();
+        });
+
+        // 初回描画
+        renderStationsList();
+        
+        // 画像アップロードのプレビュー＆Base64変換処理
+        const fileInput = document.getElementById('master-icon-file');
+        const previewContainer = document.getElementById('icon-preview-container');
+        
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    previewContainer.innerHTML = `<img src="${event.target.result}" id="master-icon-img" style="width: 100%; height: 100%; object-fit: cover;">`;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        // フォーム保存処理
+        const form = document.getElementById('master-admin-form');
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const hqVal = document.getElementById('master-hq-name').value.trim();
+            const platoonsVal = document.getElementById('master-platoons').value.trim();
+            
+            const checkedShifts = [];
+            document.querySelectorAll('input[name="master-shifts"]:checked').forEach(cb => {
+                checkedShifts.push(cb.value);
+            });
+            
+            const imgEl = document.getElementById('master-icon-img');
+            const iconVal = imgEl ? imgEl.src : '';
+            
+            // 署所データの最終同期・クリーンアップ
+            const stationsData = [];
+            document.querySelectorAll('.station-block').forEach(block => {
+                const stationName = block.querySelector('.station-name-input').value.trim();
+                if (!stationName) return;
+                
+                const subStations = [];
+                block.querySelectorAll('.sub-station-name-input').forEach(subInput => {
+                    const subName = subInput.value.trim();
+                    if (subName) {
+                        subStations.push(subName);
+                    }
+                });
+                
+                stationsData.push({
+                    name: stationName,
+                    sub_stations: subStations
+                });
+            });
+            
+            window.safeStorage.setItem('master_hq_name', hqVal);
+            window.safeStorage.setItem('master_platoon_names', platoonsVal);
+            window.safeStorage.setItem('master_shift_types', checkedShifts.join(','));
+            window.safeStorage.setItem('master_stations', JSON.stringify(stationsData));
+            if (iconVal) {
+                window.safeStorage.setItem('master_system_icon', iconVal);
+            }
+            
+            this.showToast('マスタ初期設定をローカルに保存しました。', 'success');
+        });
     }
 };
 
