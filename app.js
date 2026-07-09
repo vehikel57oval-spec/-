@@ -39,7 +39,8 @@ const DEFAULT_VEHICLE_SPECS = [
     { name: "はしご車", roles: ["隊長", "機関員", "隊員"], requiresLarge: true },
     { name: "拠点機能車", roles: ["隊長", "機関員", "隊員"], requiresLarge: true },
     { name: "予備車", roles: ["隊長", "機関員", "隊員"], requiresLarge: false },
-    { name: "卓上通信", roles: ["隊員"], requiresLarge: false }
+    { name: "卓上通信", roles: ["隊員"], requiresLarge: false },
+    { name: "通信", roles: ["隊員1", "隊員2", "隊員3", "隊員4"], requiresLarge: false }
 ];
 
 function loadVehicleSpecs() {

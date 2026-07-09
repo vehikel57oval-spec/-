@@ -293,6 +293,22 @@ class Statement {
             return s ? { pin_hash: s.pin_hash } : undefined;
         }
 
+        // 5-2. 休暇申請の詳細取得（承認審査用）
+        if (sql.includes("FROM leave_requests lr") && sql.includes("lr.id = ?")) {
+            const id = parseInt(params[0], 10);
+            if (!dbData.leave_requests) dbData.leave_requests = [];
+            const lr = dbData.leave_requests.find(x => x.id === id);
+            if (!lr) return undefined;
+            const s = dbData.staff.find(x => x.id === lr.staff_id) || {};
+            return {
+                ...lr,
+                station_id: s.station_id,
+                platoon: s.platoon,
+                is_day_worker: s.is_day_worker,
+                annual_leave_balance: s.annual_leave_balance
+            };
+        }
+
         // 6. 出勤中の勤怠レコードチェック
         if (sql === "SELECT * FROM attendance_records WHERE staff_id = ? AND actual_clock_out IS NULL") {
             return dbData.attendance_records.find(x => x.staff_id === params[0] && !x.actual_clock_out);
@@ -486,6 +502,81 @@ class Statement {
                 name: x.name,
                 code: x.code
             }));
+        }
+
+        // 0-2. 休暇申請履歴の取得
+        if (sql.includes("FROM leave_requests lr") && sql.includes("lr.staff_id = ?") && !sql.includes("lr.status = 'pending'")) {
+            const staffId = params[0];
+            if (!dbData.leave_requests) dbData.leave_requests = [];
+            let list = dbData.leave_requests.filter(x => x.staff_id === staffId);
+            
+            let joined = list.map(item => {
+                const approver = dbData.staff.find(x => x.id === item.approved_by);
+                return {
+                    ...item,
+                    approved_by_name: approver ? approver.name : null
+                };
+            });
+            joined.sort((a, b) => b.created_at.localeCompare(a.created_at));
+            return joined;
+        }
+
+        // 0-3. 未承認の休暇申請一覧取得（管理者用）
+        if (sql.includes("FROM leave_requests lr") && sql.includes("lr.status = 'pending'")) {
+            if (!dbData.leave_requests) dbData.leave_requests = [];
+            let list = dbData.leave_requests.filter(x => x.status === 'pending');
+            
+            let joined = list.map(item => {
+                const s = dbData.staff.find(x => x.id === item.staff_id) || {};
+                const st = dbData.stations.find(x => x.id === s.station_id) || {};
+                return {
+                    ...item,
+                    staff_name: s.name,
+                    employee_number: s.employee_number,
+                    rank: s.rank,
+                    position: s.position || s.rank,
+                    station_name: st.name,
+                    station_id: s.station_id
+                };
+            });
+            
+            if (sql.includes("AND s.station_id = ?")) {
+                const stationId = params[0];
+                joined = joined.filter(x => x.station_id === stationId);
+            }
+            
+            joined.sort((a, b) => a.created_at.localeCompare(b.created_at));
+            return joined;
+        }
+
+        // 0-4. 出勤簿(ledger)での休暇申請リストの取得
+        if (sql.includes("FROM leave_requests") && sql.includes("status = 'approved'") && sql.includes("start_date BETWEEN")) {
+            const staffId = params[0];
+            const start = params[1];
+            const end = params[2];
+            if (!dbData.leave_requests) dbData.leave_requests = [];
+            
+            return dbData.leave_requests.filter(x => 
+                x.staff_id === staffId && 
+                x.status === 'approved' && 
+                x.start_date >= start && 
+                x.start_date <= end
+            );
+        }
+
+        // 0-5. 手当検証(admin.js)での有給休暇リストの取得
+        if (sql.includes("FROM leave_requests") && sql.includes("status = \"approved\"") && sql.includes("start_date <= ? AND end_date >= ?")) {
+            const staffId = params[0];
+            const targetDate1 = params[1];
+            const targetDate2 = params[2];
+            if (!dbData.leave_requests) dbData.leave_requests = [];
+            
+            return dbData.leave_requests.filter(x => 
+                x.staff_id === staffId && 
+                x.status === 'approved' && 
+                x.start_date <= targetDate1 && 
+                x.end_date >= targetDate2
+            );
         }
 
         // 1. 履歴一覧取得
@@ -1412,7 +1503,21 @@ class Statement {
             if (!dbData.leave_requests) dbData.leave_requests = [];
             const id = dbData.leave_requests.length + 1;
             
-            if (params.length === 5) {
+            if (params.length >= 8) {
+                dbData.leave_requests.push({
+                    id,
+                    staff_id: parseInt(params[0]),
+                    leave_type: params[1],
+                    start_date: params[2],
+                    end_date: params[3],
+                    start_time: params[4],
+                    end_time: params[5],
+                    hours: params[6] ? parseFloat(params[6]) : null,
+                    reason: params[7] || null,
+                    status: sql.includes("'pending'") || sql.includes('"pending"') ? 'pending' : (params[8] || 'pending'),
+                    created_at: new Date().toISOString()
+                });
+            } else if (params.length === 5) {
                 dbData.leave_requests.push({
                     id,
                     staff_id: parseInt(params[0]),
@@ -1485,6 +1590,26 @@ class Statement {
             
             lastInsertRowid = id;
             changes = 1;
+        }
+        
+        // 休暇申請の更新（承認・却下）
+        else if (sql.includes("UPDATE leave_requests")) {
+            if (!dbData.leave_requests) dbData.leave_requests = [];
+            
+            if (sql.includes("SET status = ?, approved_by = ?, approved_at = ? WHERE id = ?")) {
+                const status = params[0];
+                const approved_by = parseInt(params[1], 10);
+                const approved_at = params[2];
+                const id = parseInt(params[3], 10);
+                
+                const item = dbData.leave_requests.find(x => x.id === id);
+                if (item) {
+                    item.status = status;
+                    item.approved_by = approved_by;
+                    item.approved_at = approved_at;
+                    changes = 1;
+                }
+            }
         }
 
         saveDatabase();

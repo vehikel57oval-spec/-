@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require('../db/database');
 const { verifyToken, requireRole } = require('../middleware/auth');
 
-const DEFAULT_VEHICLES = ["指揮車", "タンク車", "救急車1", "救急車2", "救助工作車", "はしご車", "拠点機能車", "予備車", "卓上通信"];
+const DEFAULT_VEHICLES = ["指揮車", "タンク車", "救急車1", "救急車2", "救助工作車", "はしご車", "拠点機能車", "予備車", "卓上通信", "通信"];
 
 // 時間文字列(HH:MM)を分換算するヘルパー
 function parseTimeToMinutes(timeStr) {

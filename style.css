@@ -2109,3 +2109,208 @@ body.role-viewer .vehicle-slot-select {
     }
 }
 
+/* ==========================================================================
+   休暇申請フォーム（ステップ型ウィザード）用スタイル
+   ========================================================================== */
+
+/* ウィザード進行インジケーター */
+.wizard-steps-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 30px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 16px 24px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.wizard-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    z-index: 2;
+}
+
+.wizard-step .step-num {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--secondary-bg);
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    border: 2px solid var(--border-color);
+    transition: all var(--transition-normal);
+}
+
+.wizard-step .step-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    transition: all var(--transition-normal);
+}
+
+.wizard-step.active .step-num {
+    background: var(--primary-color);
+    color: #ffffff;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 12px rgba(79, 70, 229, 0.4);
+}
+
+.wizard-step.active .step-text {
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+.wizard-connector {
+    flex: 1;
+    height: 3px;
+    background: var(--border-color);
+    margin: 0 -10px;
+    margin-top: -20px; /* 数字の位置と合わせる */
+    z-index: 1;
+    transition: all var(--transition-normal);
+}
+
+.wizard-connector.active {
+    background: var(--primary-color);
+}
+
+/* フォームステップパネル（表示制御） */
+.form-step-panel {
+    display: none;
+    animation: fadeIn 0.4s ease forwards;
+}
+
+.form-step-panel.active {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.step-panel-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    border-left: 4px solid var(--primary-color);
+    padding-left: 8px;
+}
+
+/* 休暇区分のカード型選択グリッド */
+.leave-type-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 10px;
+}
+
+.leave-type-card {
+    cursor: pointer;
+}
+
+.leave-type-card input[type="radio"] {
+    display: none;
+}
+
+.leave-type-card .card-content {
+    background: var(--bg-input);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: all var(--transition-normal);
+}
+
+.leave-type-card .card-icon {
+    font-size: 28px;
+}
+
+.leave-type-card .card-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.leave-type-card .card-desc {
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+/* ラジオボタンチェック時のカードスタイル */
+.leave-type-card input[type="radio"]:checked + .card-content {
+    border-color: var(--primary-color);
+    background: var(--primary-light);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+[data-theme="dark"] .leave-type-card input[type="radio"]:checked + .card-content {
+    background: rgba(99, 102, 241, 0.15);
+}
+
+/* フッターボタンエリア */
+.step-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 20px;
+    margin-top: 10px;
+}
+
+/* 申請サマリー確認カード */
+.leave-summary-card {
+    background: var(--secondary-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px dashed var(--border-color);
+    padding-bottom: 8px;
+}
+
+.summary-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.summary-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.summary-val {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* 各種ステータスバッジの追加定義 */
+.badge-pending {
+    background-color: var(--color-holiday-bg) !important;
+    color: #ffffff !important;
+}
+
+/* 承認画面の表マージン */
+.table-responsive + .card {
+    margin-top: 24px;
+}
+

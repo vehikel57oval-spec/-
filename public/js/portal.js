@@ -370,7 +370,7 @@ const Portal = {
                     break;
                 case 'leave':
                     breadcrumb.textContent = '休暇申請';
-                    this.renderLeavePlaceholder(contentBody);
+                    this.renderLeavePage(contentBody);
                     break;
                 case 'approvals':
                     breadcrumb.textContent = '打刻修正承認';
@@ -518,49 +518,234 @@ const Portal = {
         }
     },
 
-    /* ==========================================================================
-       その他のページプレースホルダー・レンダリング
-       ========================================================================== */
-    
-    renderSchedulePlaceholder(container) {
+    /**
+     * 休暇申請ページのレンダリング (ステップ型ウィザード)
+     */
+    async renderLeavePage(container) {
+        const leaveBalance = Auth.user.annual_leave_balance !== undefined && Auth.user.annual_leave_balance !== null
+            ? parseFloat(Auth.user.annual_leave_balance)
+            : 20.0;
+
         container.innerHTML = `
-            <div class="card" style="display:flex; flex-direction:column; gap:20px;">
-                <h3>勤務スケジュール表 (本カレンダー機能)</h3>
-                <p style="color:var(--text-secondary)">既存の自動勤務作成表システムと連動予定です。現在、職員マスタ情報をベースにした当務および日勤のシフトパターンが同期されます。</p>
-                <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:40px; text-align:center; color:var(--text-muted);">
-                    <i data-lucide="calendar" style="width:48px; height:48px; margin-bottom:12px;"></i>
-                    <p>カレンダー連動機能開発中</p>
+            <div class="card" style="display:flex; flex-direction:column; gap:24px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:16px;">
+                    <div>
+                        <h3 style="margin:0; font-size:18px;">各種休暇の申請</h3>
+                        <p style="color:var(--text-secondary); font-size:13px; margin:4px 0 0 0;">年次有給休暇や特別休暇の申請を行います。承認後、スケジュールに自動で同期されます。</p>
+                    </div>
+                    <div style="background:var(--primary-glow); padding:8px 16px; border-radius:8px; border:1px solid var(--primary-color);">
+                        <span style="font-size:12px; color:var(--text-secondary);">年休残日数:</span>
+                        <strong style="font-size:16px; color:var(--primary-color); margin-left:4px;">${leaveBalance.toFixed(2)}日</strong>
+                    </div>
+                </div>
+                
+                <!-- ウィザードプログレスバー -->
+                <div class="wizard-steps-container">
+                    <div class="wizard-step active" id="step-indicator-1">
+                        <span class="step-num">1</span>
+                        <span class="step-text">区分選択</span>
+                    </div>
+                    <div class="wizard-connector" id="connector-1"></div>
+                    <div class="wizard-step" id="step-indicator-2">
+                        <span class="step-num">2</span>
+                        <span class="step-text">日時指定</span>
+                    </div>
+                    <div class="wizard-connector" id="connector-2"></div>
+                    <div class="wizard-step" id="step-indicator-3">
+                        <span class="step-num">3</span>
+                        <span class="step-text">理由入力・確認</span>
+                    </div>
+                </div>
+                
+                <!-- フォームエリア -->
+                <form id="leave-request-form" onsubmit="Portal.handleLeaveSubmit(event)">
+                    <!-- ステップ1: 区分選択 -->
+                    <div class="form-step-panel active" id="form-step-panel-1">
+                        <h4 class="step-panel-title">1. 休暇区分を選択してください</h4>
+                        <div class="leave-type-grid">
+                            <label class="leave-type-card">
+                                <input type="radio" name="leave_type" value="annual" checked onchange="Portal.toggleLeaveTypeUI()">
+                                <div class="card-content">
+                                    <div class="card-icon icon-annual">📅</div>
+                                    <div class="card-title">年次有給休暇</div>
+                                    <div class="card-desc">通常の有給休暇です（1日 / 半日 / 時間単位）</div>
+                                </div>
+                            </label>
+                            <label class="leave-type-card">
+                                <input type="radio" name="leave_type" value="special" onchange="Portal.toggleLeaveTypeUI()">
+                                <div class="card-content">
+                                    <div class="card-icon icon-special">🎗️</div>
+                                    <div class="card-title">特別休暇</div>
+                                    <div class="card-desc">慶弔、公務、夏季休暇など特定の理由による休暇</div>
+                                </div>
+                            </label>
+                            <label class="leave-type-card">
+                                <input type="radio" name="leave_type" value="sick" onchange="Portal.toggleLeaveTypeUI()">
+                                <div class="card-content">
+                                    <div class="card-icon icon-sick">🏥</div>
+                                    <div class="card-title">病気休暇</div>
+                                    <div class="card-desc">疾病や負傷等により療養するための休暇</div>
+                                </div>
+                            </label>
+                            <label class="leave-type-card">
+                                <input type="radio" name="leave_type" value="compensatory" onchange="Portal.toggleLeaveTypeUI()">
+                                <div class="card-content">
+                                    <div class="card-icon icon-compensatory">⏳</div>
+                                    <div class="card-title">代休・振替休日</div>
+                                    <div class="card-desc">休日出勤等の代わりに取得する休日</div>
+                                </div>
+                            </label>
+                        </div>
+                        
+                        <div class="step-footer">
+                            <button type="button" class="btn btn-primary" onclick="Portal.setLeaveFormStep(2)" style="padding:10px 24px;">次へ進む &rarr;</button>
+                        </div>
+                    </div>
+                    
+                    <!-- ステップ2: 日時指定 -->
+                    <div class="form-step-panel" id="form-step-panel-2">
+                        <h4 class="step-panel-title">2. 取得する日時を指定してください</h4>
+                        
+                        <div class="form-group" id="leave-unit-container" style="margin-bottom: 20px;">
+                            <label class="form-label">取得単位</label>
+                            <div style="display:flex; gap:16px; margin-top:8px;">
+                                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                    <input type="radio" name="leave_unit" value="full" checked onchange="Portal.toggleLeaveUnit()"> 終日 (1日〜複数日)
+                                </label>
+                                <label id="leave-unit-hour-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                    <input type="radio" name="leave_unit" value="hour" onchange="Portal.toggleLeaveUnit()"> 時間休 (時間単位)
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- 終日時の日付指定 -->
+                        <div id="leave-date-range-inputs" style="display:flex; gap:16px; margin-bottom:20px; flex-wrap:wrap;">
+                            <div class="form-group" style="flex:1; min-width:200px;">
+                                <label class="form-label" for="leave-start-date">開始日</label>
+                                <input type="date" id="leave-start-date" class="form-input" required onchange="Portal.validateLeaveDates()">
+                            </div>
+                            <div class="form-group" style="flex:1; min-width:200px;">
+                                <label class="form-label" for="leave-end-date">終了日</label>
+                                <input type="date" id="leave-end-date" class="form-input" required onchange="Portal.validateLeaveDates()">
+                            </div>
+                        </div>
+                        
+                        <!-- 時間休時の指定 -->
+                        <div id="leave-time-inputs" style="display:none; flex-direction:column; gap:16px; margin-bottom:20px;">
+                            <div class="form-group" style="max-width:280px;">
+                                <label class="form-label" for="leave-target-date">対象日</label>
+                                <input type="date" id="leave-target-date" class="form-input" onchange="Portal.validateLeaveDates()">
+                            </div>
+                            <div style="display:flex; gap:16px; align-items:center;">
+                                <div class="form-group" style="flex:1; max-width:140px;">
+                                    <label class="form-label" for="leave-start-time">開始時刻</label>
+                                    <input type="time" id="leave-start-time" class="form-input" value="08:30" onchange="Portal.calculateLeaveHoursPreview()">
+                                </div>
+                                <div class="form-group" style="flex:1; max-width:140px;">
+                                    <label class="form-label" for="leave-end-time">終了時刻</label>
+                                    <input type="time" id="leave-end-time" class="form-input" value="17:15" onchange="Portal.calculateLeaveHoursPreview()">
+                                </div>
+                                <div style="margin-top:24px; font-size:13px; color:var(--text-secondary);">
+                                    申請時間数: <strong id="leave-hours-preview" style="color:var(--primary-color); font-size:16px;">-</strong> 時間
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="step-footer">
+                            <button type="button" class="btn btn-secondary" onclick="Portal.setLeaveFormStep(1)">&larr; 戻る</button>
+                            <button type="button" class="btn btn-primary" onclick="Portal.setLeaveFormStep(3)" style="padding:10px 24px;">次へ進む &rarr;</button>
+                        </div>
+                    </div>
+                    
+                    <!-- ステップ3: 理由・確認 -->
+                    <div class="form-step-panel" id="form-step-panel-3">
+                        <h4 class="step-panel-title">3. 申請理由を入力し、内容を確認して送信してください</h4>
+                        
+                        <div class="form-group" style="margin-bottom:20px;">
+                            <label class="form-label" for="leave-reason">申請理由・業務引き継ぎ内容</label>
+                            <textarea id="leave-reason" class="form-input" style="height:100px; padding:10px;" placeholder="例: 私用のため、家族看護のため、等" required></textarea>
+                        </div>
+                        
+                        <!-- 申請プレビューサマリー -->
+                        <div class="leave-summary-card">
+                            <h5 style="margin:0 0 10px 0; font-size:14px; font-weight:600; border-bottom:1px solid var(--border-color); padding-bottom:6px;">📋 申請内容の最終確認</h5>
+                            <div class="summary-row">
+                                <span class="summary-label">休暇区分:</span>
+                                <strong class="summary-val" id="summary-leave-type">-</strong>
+                            </div>
+                            <div class="summary-row">
+                                <span class="summary-label">申請日時:</span>
+                                <strong class="summary-val" id="summary-leave-period">-</strong>
+                            </div>
+                            <div class="summary-row">
+                                <span class="summary-label">残日数への影響:</span>
+                                <strong class="summary-val" id="summary-leave-impact" style="color:var(--danger);">-</strong>
+                            </div>
+                        </div>
+                        
+                        <div class="step-footer">
+                            <button type="button" class="btn btn-secondary" onclick="Portal.setLeaveFormStep(2)">&larr; 戻る</button>
+                            <button type="submit" class="btn btn-primary" style="padding:10px 30px; background:var(--success);">この内容で申請を送信する</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            
+            <!-- 休暇申請履歴リスト -->
+            <div class="card" style="margin-top:24px;">
+                <h3 style="margin-bottom:16px;">あなたの休暇申請履歴</h3>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>申請日時</th>
+                                <th>休暇区分</th>
+                                <th>期間・時間</th>
+                                <th>理由</th>
+                                <th>ステータス</th>
+                                <th>承認者</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leave-history-tbody">
+                            <tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">履歴を読み込んでいます...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         `;
+        
+        // 日付初期設定 (今日)
+        const todayStr = new Date().toISOString().split('T')[0];
+        const startD = document.getElementById('leave-start-date');
+        const endD = document.getElementById('leave-end-date');
+        const targetD = document.getElementById('leave-target-date');
+        if (startD) startD.value = todayStr;
+        if (endD) endD.value = todayStr;
+        if (targetD) targetD.value = todayStr;
+        
+        // 履歴のロード
+        this.loadLeaveHistory();
     },
 
-    renderLeavePlaceholder(container) {
-        container.innerHTML = `
-            <div class="card" style="display:flex; flex-direction:column; gap:20px;">
-                <h3>各種休暇の申請</h3>
-                <p style="color:var(--text-secondary)">年次有給休暇や特別休暇の申請を行います。申請された休暇は上司（署長・本部管理者）による承認後にスケジュールへ反映されます。</p>
-                <p>現在の年休残日数: <strong>${Auth.user.annual_leave_balance || 20}日</strong></p>
-                <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:40px; text-align:center; color:var(--text-muted);">
-                    <i data-lucide="file-plus" style="width:48px; height:48px; margin-bottom:12px;"></i>
-                    <p>休暇申請フォーム開発中</p>
-                </div>
-            </div>
-        `;
-    },
-
-    // 修正承認画面
     async renderApprovalsPage(container) {
-        const response = await fetch('/api/attendance/pending', {
+        // 1. 打刻修正申請の取得
+        const resMod = await fetch('/api/attendance/pending', {
             headers: { 'Authorization': `Bearer ${Auth.token}` }
         });
-        const data = await response.json();
+        const dataMod = await resMod.json();
         
-        let rowsHtml = '';
-        if (data.pending.length === 0) {
-            rowsHtml = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:30px;">未処理の修正申請はありません。</td></tr>`;
+        // 2. 休暇申請の取得
+        const resLeave = await fetch('/api/attendance/leaves/pending', {
+            headers: { 'Authorization': `Bearer ${Auth.token}` }
+        });
+        const dataLeave = await resLeave.json();
+        
+        // 打刻修正の行生成
+        let modRowsHtml = '';
+        if (dataMod.pending.length === 0) {
+            modRowsHtml = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:30px;">未処理の修正申請はありません。</td></tr>`;
         } else {
-            rowsHtml = data.pending.map(item => `
+            modRowsHtml = dataMod.pending.map(item => `
                 <tr>
                     <td>${item.work_date}</td>
                     <td>${item.staff_name} (${item.employee_number})</td>
@@ -576,8 +761,49 @@ const Portal = {
             `).join('');
         }
         
+        // 休暇申請の行生成
+        let leaveRowsHtml = '';
+        const typeLabels = {
+            'annual': '年次有給休暇',
+            'special': '特別休暇',
+            'sick': '病気休暇',
+            'compensatory': '代休・振替休日'
+        };
+        
+        if (dataLeave.pending.length === 0) {
+            leaveRowsHtml = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:30px;">未処理の休暇申請はありません。</td></tr>`;
+        } else {
+            leaveRowsHtml = dataLeave.pending.map(item => {
+                let periodStr = '';
+                if (item.start_time && item.end_time) {
+                    periodStr = `${item.start_date} ${item.start_time}〜${item.end_time} (${item.hours}h)`;
+                } else {
+                    if (item.start_date === item.end_date) {
+                        periodStr = item.start_date;
+                    } else {
+                        periodStr = `${item.start_date} 〜 ${item.end_date}`;
+                    }
+                }
+                
+                return `
+                    <tr>
+                        <td>${item.staff_name} (${item.employee_number})</td>
+                        <td>${item.station_name}</td>
+                        <td><span class="badge" style="background:var(--primary-glow); color:var(--primary-color); font-weight:600;">${typeLabels[item.leave_type] || item.leave_type}</span></td>
+                        <td>${periodStr}</td>
+                        <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${item.reason}">${item.reason}</td>
+                        <td>
+                            <button class="btn btn-primary" style="padding:6px 12px; font-size:12px; background:var(--success); border-radius:6px;" onclick="Portal.processLeaveApproval(${item.id}, 'approved')">承認</button>
+                            <button class="btn btn-primary" style="padding:6px 12px; font-size:12px; background:var(--danger); border-radius:6px;" onclick="Portal.processLeaveApproval(${item.id}, 'rejected')">却下</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+        
         container.innerHTML = `
-            <div class="card">
+            <!-- 打刻修正申請 -->
+            <div class="card" style="margin-bottom:24px;">
                 <h3>打刻修正申請の承認処理</h3>
                 <p style="color:var(--text-secondary); margin-bottom:16px;">一般職員より申請された、出勤・退勤時刻の修正を審査します。</p>
                 <div class="table-responsive">
@@ -594,7 +820,30 @@ const Portal = {
                             </tr>
                         </thead>
                         <tbody>
-                            ${rowsHtml}
+                            ${modRowsHtml}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- 休暇申請 -->
+            <div class="card">
+                <h3>休暇申請の承認処理</h3>
+                <p style="color:var(--text-secondary); margin-bottom:16px;">一般職員より申請された、年休・特休・病休等の各種休暇を審査します。承認すると自動的にスケジュールに反映されます。</p>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>職員名</th>
+                                <th>所属</th>
+                                <th>休暇区分</th>
+                                <th>期間・時間</th>
+                                <th>理由</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${leaveRowsHtml}
                         </tbody>
                     </table>
                 </div>
@@ -605,6 +854,29 @@ const Portal = {
     async processApproval(id, status) {
         try {
             const response = await fetch(`/api/attendance/${id}/approve`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Auth.token}`
+                },
+                body: JSON.stringify({ status })
+            });
+            const data = await response.json();
+            if (response.ok) {
+                this.showToast(data.message, 'success');
+                this.updatePendingApprovalBadge();
+                this.navigate('approvals');
+            } else {
+                this.showToast(data.error, 'error');
+            }
+        } catch (err) {
+            this.showToast('通信エラーが発生しました。', 'error');
+        }
+    },
+
+    async processLeaveApproval(id, status) {
+        try {
+            const response = await fetch(`/api/attendance/leave/${id}/approve`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1736,6 +2008,314 @@ const Portal = {
             
             this.showToast('マスタ初期設定をローカルに保存しました。', 'success');
         });
+    },
+
+    setLeaveFormStep(step) {
+        document.querySelectorAll('.wizard-step').forEach((el, idx) => {
+            if (idx + 1 === step) {
+                el.classList.add('active');
+            } else if (idx + 1 < step) {
+                el.classList.add('active');
+            } else {
+                el.classList.remove('active');
+            }
+        });
+
+        for (let i = 1; i <= 2; i++) {
+            const conn = document.getElementById(`connector-${i}`);
+            if (conn) {
+                if (i < step) {
+                    conn.classList.add('active');
+                } else {
+                    conn.classList.remove('active');
+                }
+            }
+        }
+
+        document.querySelectorAll('.form-step-panel').forEach((el, idx) => {
+            if (idx + 1 === step) {
+                el.classList.add('active');
+            } else {
+                el.classList.remove('active');
+            }
+        });
+
+        if (step === 3) {
+            this.updateLeaveSummaryPreview();
+        }
+    },
+
+    toggleLeaveTypeUI() {
+        const leaveType = document.querySelector('input[name="leave_type"]:checked').value;
+        const hourLabel = document.getElementById('leave-unit-hour-label');
+        
+        if (leaveType !== 'annual') {
+            if (hourLabel) hourLabel.style.display = 'none';
+            const fullUnit = document.querySelector('input[name="leave_unit"][value="full"]');
+            if (fullUnit) fullUnit.checked = true;
+            this.toggleLeaveUnit();
+        } else {
+            if (hourLabel) hourLabel.style.display = 'flex';
+        }
+    },
+
+    toggleLeaveUnit() {
+        const unit = document.querySelector('input[name="leave_unit"]:checked').value;
+        const dateRangeEl = document.getElementById('leave-date-range-inputs');
+        const timeEl = document.getElementById('leave-time-inputs');
+        
+        if (unit === 'full') {
+            if (dateRangeEl) dateRangeEl.style.display = 'flex';
+            if (timeEl) timeEl.style.display = 'none';
+            const startD = document.getElementById('leave-start-date');
+            const endD = document.getElementById('leave-end-date');
+            const targetD = document.getElementById('leave-target-date');
+            if (startD) startD.required = true;
+            if (endD) endD.required = true;
+            if (targetD) targetD.required = false;
+        } else {
+            if (dateRangeEl) dateRangeEl.style.display = 'none';
+            if (timeEl) timeEl.style.display = 'flex';
+            const startD = document.getElementById('leave-start-date');
+            const endD = document.getElementById('leave-end-date');
+            const targetD = document.getElementById('leave-target-date');
+            if (startD) startD.required = false;
+            if (endD) endD.required = false;
+            if (targetD) targetD.required = true;
+            this.calculateLeaveHoursPreview();
+        }
+    },
+
+    validateLeaveDates() {
+        const unit = document.querySelector('input[name="leave_unit"]:checked').value;
+        
+        if (unit === 'full') {
+            const start = document.getElementById('leave-start-date').value;
+            const end = document.getElementById('leave-end-date').value;
+            if (start && end && start > end) {
+                this.showToast('開始日は終了日より前の日付を指定してください。', 'warning');
+                document.getElementById('leave-end-date').value = start;
+            }
+        }
+    },
+
+    calculateLeaveHoursPreview() {
+        const start = document.getElementById('leave-start-time').value;
+        const end = document.getElementById('leave-end-time').value;
+        
+        if (!start || !end) return;
+        
+        const [sh, sm] = start.split(':').map(Number);
+        const [eh, em] = end.split(':').map(Number);
+        
+        let startMin = sh * 60 + sm;
+        let endMin = eh * 60 + em;
+        
+        if (endMin < startMin) endMin += 24 * 60;
+        
+        let diffMin = endMin - startMin;
+        
+        let breakMin = 0;
+        const breakStart = 12 * 60;
+        const breakEnd = 13 * 60;
+        
+        for (let m = startMin; m < endMin; m++) {
+            const cur = m % (24 * 60);
+            if (cur >= breakStart && cur < breakEnd) {
+                breakMin++;
+            }
+        }
+        
+        const actMin = diffMin - breakMin;
+        const hours = Math.max(0, actMin / 60);
+        
+        const previewEl = document.getElementById('leave-hours-preview');
+        if (previewEl) previewEl.textContent = hours.toFixed(2);
+    },
+
+    updateLeaveSummaryPreview() {
+        const leaveType = document.querySelector('input[name="leave_type"]:checked').value;
+        const unit = document.querySelector('input[name="leave_unit"]:checked').value;
+        
+        const typeLabels = {
+            'annual': '年次有給休暇',
+            'special': '特別休暇',
+            'sick': '病気休暇',
+            'compensatory': '代休・振替休日'
+        };
+        
+        const typeEl = document.getElementById('summary-leave-type');
+        if (typeEl) typeEl.textContent = typeLabels[leaveType];
+        
+        let periodStr = '';
+        let impactStr = '';
+        
+        if (unit === 'full') {
+            const start = document.getElementById('leave-start-date').value;
+            const end = document.getElementById('leave-end-date').value;
+            periodStr = `${start} 〜 ${end} (終日)`;
+            
+            const daysCount = Math.round((new Date(end.replace(/-/g, '/')) - new Date(start.replace(/-/g, '/'))) / (1000 * 60 * 60 * 24)) + 1;
+            
+            if (leaveType === 'annual') {
+                const isDayWorker = !!Auth.user.is_day_worker;
+                const cost = isDayWorker ? daysCount : daysCount * 2.0;
+                impactStr = `年休残高より ${cost.toFixed(1)} 日 減算されます`;
+            } else {
+                impactStr = '年休残高への影響はありません';
+            }
+        } else {
+            const date = document.getElementById('leave-target-date').value;
+            const start = document.getElementById('leave-start-time').value;
+            const end = document.getElementById('leave-end-time').value;
+            const previewEl = document.getElementById('leave-hours-preview');
+            const hrs = previewEl ? previewEl.textContent : '-';
+            periodStr = `${date} の ${start} 〜 ${end} (${hrs}時間)`;
+            
+            if (leaveType === 'annual') {
+                const days = parseFloat(hrs) / 8.0;
+                impactStr = `年休残高より ${days.toFixed(2)} 日分 (時間休) 減算されます`;
+            } else {
+                impactStr = '年休残高への影響はありません';
+            }
+        }
+        
+        const periodEl = document.getElementById('summary-leave-period');
+        const impactEl = document.getElementById('summary-leave-impact');
+        if (periodEl) periodEl.textContent = periodStr;
+        if (impactEl) impactEl.textContent = impactStr;
+    },
+
+    async handleLeaveSubmit(event) {
+        event.preventDefault();
+        
+        const leaveType = document.querySelector('input[name="leave_type"]:checked').value;
+        const unit = document.querySelector('input[name="leave_unit"]:checked').value;
+        const reason = document.getElementById('leave-reason').value.trim();
+        
+        let start_date = '';
+        let end_date = '';
+        let start_time = '';
+        let end_time = '';
+        
+        if (unit === 'full') {
+            start_date = document.getElementById('leave-start-date').value;
+            end_date = document.getElementById('leave-end-date').value;
+        } else {
+            start_date = document.getElementById('leave-target-date').value;
+            end_date = start_date;
+            start_time = document.getElementById('leave-start-time').value;
+            end_time = document.getElementById('leave-end-time').value;
+        }
+        
+        const btnSubmit = event.target.querySelector('button[type="submit"]');
+        if (btnSubmit) {
+            btnSubmit.disabled = true;
+            btnSubmit.textContent = '申請送信中...';
+        }
+        
+        try {
+            const response = await fetch('/api/attendance/leave', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Auth.token}`
+                },
+                body: JSON.stringify({
+                    leave_type: leaveType,
+                    start_date,
+                    end_date,
+                    start_time,
+                    end_time,
+                    reason
+                })
+            });
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.showToast(data.message, 'success');
+                this.navigate('leave');
+            } else {
+                this.showToast(data.error || '申請の送信に失敗しました。', 'error');
+                if (btnSubmit) {
+                    btnSubmit.disabled = false;
+                    btnSubmit.textContent = 'この内容で申請を送信する';
+                }
+            }
+        } catch (err) {
+            this.showToast('通信エラーが発生しました。', 'error');
+            if (btnSubmit) {
+                btnSubmit.disabled = false;
+                btnSubmit.textContent = 'この内容で申請を送信する';
+            }
+        }
+    },
+
+    async loadLeaveHistory() {
+        const tbody = document.getElementById('leave-history-tbody');
+        if (!tbody) return;
+        
+        try {
+            const response = await fetch('/api/attendance/leave', {
+                headers: { 'Authorization': `Bearer ${Auth.token}` }
+            });
+            const data = await response.json();
+            
+            if (!response.ok || !data.success) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--danger);">履歴の取得に失敗しました。</td></tr>`;
+                return;
+            }
+            
+            if (data.list.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">休暇申請履歴はありません。</td></tr>`;
+                return;
+            }
+            
+            const typeLabels = {
+                'annual': '年有給',
+                'special': '特別休',
+                'sick': '病気休',
+                'compensatory': '代休'
+            };
+            
+            tbody.innerHTML = data.list.map(item => {
+                const dateStr = new Date(item.created_at).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+                
+                let periodStr = '';
+                if (item.start_time && item.end_time) {
+                    periodStr = `${item.start_date} ${item.start_time}〜${item.end_time} (${item.hours}h)`;
+                } else {
+                    if (item.start_date === item.end_date) {
+                        periodStr = item.start_date;
+                    } else {
+                        periodStr = `${item.start_date} 〜 ${item.end_date}`;
+                    }
+                }
+                
+                let statusBadge = '';
+                if (item.status === 'pending') {
+                    statusBadge = `<span class="badge badge-pending">承認待ち</span>`;
+                } else if (item.status === 'approved') {
+                    statusBadge = `<span class="badge badge-success" style="background:var(--success); color:#fff; font-size:12px; padding:2px 8px; border-radius:4px;">承認済</span>`;
+                } else {
+                    statusBadge = `<span class="badge badge-danger" style="background:var(--danger); color:#fff; font-size:12px; padding:2px 8px; border-radius:4px;">却下</span>`;
+                }
+                
+                return `
+                    <tr>
+                        <td>${dateStr}</td>
+                        <td><span class="badge" style="background:var(--primary-glow); color:var(--primary-color); font-weight:600;">${typeLabels[item.leave_type] || item.leave_type}</span></td>
+                        <td>${periodStr}</td>
+                        <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${item.reason}">${item.reason}</td>
+                        <td>${statusBadge}</td>
+                        <td>${item.approved_by_name || '-'}</td>
+                    </tr>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error(err);
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--danger);">通信エラーにより履歴を読み込めませんでした。</td></tr>`;
+        }
     }
 };
 

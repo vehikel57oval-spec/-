@@ -1090,5 +1090,221 @@ router.post('/ledger/approve', verifyToken, (req, res) => {
     }
 });
 
+/**
+ * @route   POST /api/attendance/leave
+ * @desc    休暇申請の新規登録
+ */
+router.post('/leave', verifyToken, (req, res) => {
+    const { leave_type, start_date, end_date, start_time, end_time, reason } = req.body;
+    
+    if (!leave_type || !start_date || !end_date || !reason) {
+        return res.status(400).json({ error: '必須項目が不足しています。' });
+    }
+    
+    try {
+        const staffId = req.user.id;
+        
+        // 有給かつ時間休の場合のhoursの計算
+        let hours = null;
+        if (leave_type === 'annual' && start_time && end_time) {
+            const staff = db.prepare('SELECT is_day_worker FROM staff WHERE id = ?').get(staffId);
+            const isDayWorker = staff ? !!staff.is_day_worker : false;
+            hours = calculateHourlyLeaveHours(start_time, end_time, isDayWorker);
+        }
+        
+        // 休暇申請のインサート
+        const info = db.prepare(`
+            INSERT INTO leave_requests (staff_id, leave_type, start_date, end_date, start_time, end_time, hours, reason, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        `).run(staffId, leave_type, start_date, end_date, start_time || null, end_time || null, hours, reason);
+        
+        // 監査ログ
+        db.prepare('INSERT INTO audit_logs (staff_id, action, target_table, target_id, details) VALUES (?, ?, ?, ?, ?)')
+            .run(staffId, 'create_leave_request', 'leave_requests', info.lastInsertRowid, `休暇申請作成: ${leave_type} (${start_date}〜${end_date})`);
+            
+        res.json({ success: true, message: '休暇申請を送信しました。承認をお待ちください。', leave_id: info.lastInsertRowid });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
+/**
+ * @route   GET /api/attendance/leave
+ * @desc    職員本人の休暇申請履歴の取得
+ */
+router.get('/leave', verifyToken, (req, res) => {
+    try {
+        const list = db.prepare(`
+            SELECT lr.*, s.name as approved_by_name
+            FROM leave_requests lr
+            LEFT JOIN staff s ON lr.approved_by = s.id
+            WHERE lr.staff_id = ?
+            ORDER BY lr.created_at DESC
+        `).all(req.user.id);
+        
+        res.json({ success: true, list });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
+/**
+ * @route   GET /api/attendance/leaves/pending
+ * @desc    未承認の休暇申請一覧取得
+ */
+router.get('/leaves/pending', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
+    try {
+        let query = `
+            SELECT lr.*, s.name as staff_name, s.employee_number, s.rank, s.position, st.name as station_name
+            FROM leave_requests lr
+            JOIN staff s ON lr.staff_id = s.id
+            JOIN stations st ON s.station_id = st.id
+            WHERE lr.status = 'pending'
+        `;
+        let params = [];
+        
+        if (req.user.role === 'chief') {
+            query += ' AND s.station_id = ?';
+            params.push(req.user.station_id);
+        }
+        
+        query += ' ORDER BY lr.created_at ASC';
+        
+        const pending = db.prepare(query).all(...params);
+        res.json({ pending });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
+/**
+ * @route   PUT /api/attendance/leave/:id/approve
+ * @desc    休暇申請の承認/却下 ＆ スケジュールへの同期反映
+ */
+router.put('/leave/:id/approve', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
+    const leaveId = parseInt(req.params.id, 10);
+    const { status } = req.body; // 'approved' or 'rejected'
+    
+    if (status !== 'approved' && status !== 'rejected') {
+        return res.status(400).json({ error: 'ステータスは approved または rejected を指定してください。' });
+    }
+    
+    const nowStr = getLocalDetails().dateTimeStr;
+    
+    try {
+        const leave = db.prepare(`
+            SELECT lr.*, s.station_id, s.platoon, s.is_day_worker, s.annual_leave_balance
+            FROM leave_requests lr
+            JOIN staff s ON lr.staff_id = s.id
+            WHERE lr.id = ?
+        `).get(leaveId);
+        
+        if (!leave) {
+            return res.status(404).json({ error: '休暇申請が見つかりません。' });
+        }
+        
+        if (leave.status !== 'pending') {
+            return res.status(400).json({ error: 'この申請はすでに処理済みです。' });
+        }
+        
+        // 管轄チェック
+        if (req.user.role === 'chief' && leave.station_id !== req.user.station_id) {
+            return res.status(403).json({ error: '管轄外の部署の職員の申請を承認することはできません。' });
+        }
+        
+        const processApproval = db.transaction(() => {
+            // 1. 申請ステータスの更新
+            db.prepare('UPDATE leave_requests SET status = ?, approved_by = ?, approved_at = ? WHERE id = ?')
+                .run(status, req.user.id, nowStr, leaveId);
+                
+            if (status === 'approved') {
+                // 2. スケジュールエントリー (schedule_entries) への同期反映
+                const start = new Date(leave.start_date.replace(/-/g, '/'));
+                const end = new Date(leave.end_date.replace(/-/g, '/'));
+                
+                const keyMap = {
+                    'annual': '有',
+                    'special': '特',
+                    'sick': '病',
+                    'compensatory': '代'
+                };
+                const shiftKey = keyMap[leave.leave_type] || '有';
+                
+                let totalConsumedDays = 0;
+                
+                for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                    const yyyy = d.getFullYear();
+                    const mm = String(d.getMonth() + 1).padStart(2, '0');
+                    const dd = String(d.getDate()).padStart(2, '0');
+                    const dateStr = `${yyyy}-${mm}-${dd}`;
+                    
+                    const startTimeVal = leave.start_time || null;
+                    const endTimeVal = leave.end_time || null;
+                    
+                    const existingEntry = db.prepare('SELECT cycle_number FROM schedule_entries WHERE staff_id = ? AND work_date = ?').get(leave.staff_id, dateStr);
+                    const cycleNum = existingEntry ? existingEntry.cycle_number : 1;
+                    
+                    db.prepare(`
+                        INSERT OR REPLACE INTO schedule_entries (
+                            staff_id, work_date, cycle_number, shift_key, start_time, end_time, is_confirmed, confirmed_by, confirmed_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `).run(leave.staff_id, dateStr, cycleNum, shiftKey, startTimeVal, endTimeVal, 1, req.user.id, nowStr);
+                    
+                    // 出勤簿データの自動生成 (勤怠レコード側)
+                    let scheduledHours = 0;
+                    if (leave.is_day_worker) {
+                        scheduledHours = 7.75;
+                    } else {
+                        scheduledHours = 15.5;
+                    }
+                    
+                    let consumedDays = 0;
+                    if (leave.start_time && leave.end_time) {
+                        const hr = calculateHourlyLeaveHours(leave.start_time, leave.end_time, !!leave.is_day_worker);
+                        consumedDays = hr / 8.0;
+                        scheduledHours = Math.max(0, scheduledHours - hr);
+                    } else {
+                        consumedDays = leave.is_day_worker ? 1.0 : 2.0;
+                        scheduledHours = 0;
+                    }
+                    
+                    if (leave.leave_type === 'annual') {
+                        totalConsumedDays += consumedDays;
+                    }
+                    
+                    if (!leave.start_time || !leave.end_time) {
+                        db.prepare('DELETE FROM attendance_records WHERE staff_id = ? AND work_date = ? AND status = \'absent\'').run(leave.staff_id, dateStr);
+                    } else {
+                        const existingAtt = db.prepare('SELECT * FROM attendance_records WHERE staff_id = ? AND work_date = ?').get(leave.staff_id, dateStr);
+                        if (existingAtt && existingAtt.status === 'absent') {
+                            db.prepare('UPDATE attendance_records SET scheduled_hours = ? WHERE staff_id = ? AND work_date = ?').run(scheduledHours, leave.staff_id, dateStr);
+                        }
+                    }
+                }
+                
+                // 3. 年休残日数の引き去り
+                if (leave.leave_type === 'annual' && totalConsumedDays > 0) {
+                    const newBalance = Math.max(0, leave.annual_leave_balance - totalConsumedDays);
+                    db.prepare('UPDATE staff SET annual_leave_balance = ? WHERE id = ?').run(newBalance, leave.staff_id);
+                }
+            }
+        });
+        
+        processApproval();
+        
+        // ログ
+        db.prepare('INSERT INTO audit_logs (staff_id, action, target_table, target_id, details) VALUES (?, ?, ?, ?, ?)')
+            .run(req.user.id, `approve_leave_${status}`, 'leave_requests', leaveId, `休暇申請の処理結果: ${status}`);
+            
+        res.json({ success: true, message: `申請を正常に${status === 'approved' ? '承認' : '却下'}しました。` });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'サーバーエラーが発生しました。' });
+    }
+});
+
 module.exports = router;
 
