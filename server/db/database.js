@@ -186,8 +186,65 @@ function migrateData() {
             }
         });
     }
+
+    // 指令センター(station_id: 4)の追加
+    if (!dbData.stations.some(s => s.id === 4)) {
+        dbData.stations.push({ id: 4, department_id: 1, name: '指令センター', code: 'dispatch' });
+        modified = true;
+    }
+
+    if (!dbData.staff.some(s => s.station_id === 4)) {
+        const hash = '$2a$10$Rn57sxVVD7stNaMSBna7u.X6hzt9CMgmRovgdtsC3tZpqwq0aoGXG'; // '1234'
+        const p1 = [
+            { employee_number: '4101', name: '指令 太郎', rank: '消防司令補', position: '指令長', role: 'chief' },
+            { employee_number: '4102', name: '指令 一郎', rank: '消防士長', position: '指令員', role: 'staff' },
+            { employee_number: '4103', name: '指令 次郎', rank: '消防士長', position: '指令員', role: 'staff' },
+            { employee_number: '4104', name: '指令 三郎', rank: '消防副士長', position: '指令員', role: 'staff' },
+            { employee_number: '4105', name: '指令 四郎', rank: '消防副士長', position: '指令員', role: 'staff' },
+            { employee_number: '4106', name: '指令 五郎', rank: '消防士', position: '指令員', role: 'staff' },
+            { employee_number: '4107', name: '指令 六郎', rank: '消防士', position: '指令員', role: 'staff' }
+        ];
+        const p2 = [
+            { employee_number: '4201', name: '通信 太郎', rank: '消防司令補', position: '指令長', role: 'chief' },
+            { employee_number: '4202', name: '通信 一郎', rank: '消防士長', position: '指令員', role: 'staff' },
+            { employee_number: '4203', name: '通信 次郎', rank: '消防士長', position: '指令員', role: 'staff' },
+            { employee_number: '4204', name: '通信 三郎', rank: '消防副士長', position: '指令員', role: 'staff' },
+            { employee_number: '4205', name: '通信 四郎', rank: '消防副士長', position: '指令員', role: 'staff' },
+            { employee_number: '4206', name: '通信 五郎', rank: '消防士', position: '指令員', role: 'staff' },
+            { employee_number: '4207', name: '通信 六郎', rank: '消防士', position: '指令員', role: 'staff' },
+            { employee_number: '4208', name: '通信 七郎', rank: '消防士', position: '指令員', role: 'staff' }
+        ];
+
+        let nextId = Math.max(...dbData.staff.map(s => s.id), 0) + 1;
+
+        const createStaff = (s, platoon) => ({
+            id: nextId++,
+            department_id: 1,
+            station_id: 4,
+            employee_number: s.employee_number,
+            pin_hash: hash,
+            name: s.name,
+            platoon: platoon,
+            rank: s.rank,
+            position: s.position,
+            has_large_license: 0,
+            is_paramedic: 0,
+            is_rescue: 0,
+            is_kikan: 0,
+            is_day_worker: 0,
+            role: s.role,
+            annual_leave_balance: 20.0,
+            is_active: 1,
+            created_at: new Date().toISOString()
+        });
+
+        p1.forEach(s => dbData.staff.push(createStaff(s, '1bu')));
+        p2.forEach(s => dbData.staff.push(createStaff(s, '2bu')));
+        modified = true;
+    }
+
     if (modified) {
-        console.log('Migrating database: Added default position fields to staff.');
+        console.log('Migrating database: Added default position fields and dispatch center data.');
         saveDatabase();
     }
 }

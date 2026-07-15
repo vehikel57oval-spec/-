@@ -130,29 +130,31 @@ const Dashboard = {
                         <div style="border-top:1px solid rgba(255,255,255,0.06); padding-top:16px; display:grid; grid-template-columns:1fr 1fr; gap:16px;">
                             <!-- 出勤ボタン -->
                             ${!todayData.record?.actual_clock_in ? `
-                                <button class="btn btn-primary" onclick="Dashboard.clockIn()" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:14px 20px; background: var(--primary-color); font-weight:600; font-size:15px; border-radius:10px; transition: all 0.2s ease; border: none; cursor: pointer;">
-                                    <i data-lucide="play" style="width:16px; height:16px;"></i> 出勤打刻 (1タップ)
+                                <button class="btn" onclick="Dashboard.clockIn()" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:14px 20px; background: var(--success); color:white; font-weight:700; font-size:15px; border-radius:10px; border:none; cursor:pointer; box-shadow:0 4px 12px rgba(40, 167, 69, 0.2); transition:all 0.2s ease;">
+                                    <i data-lucide="log-in" style="width:18px; height:18px;"></i> 出勤する
                                 </button>
                             ` : `
-                                <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; padding:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.04); border-radius:10px; height:50px;">
-                                    <span style="font-size:11px; color:var(--text-muted);">出勤時刻</span>
-                                    <span style="font-size:15px; font-weight:600; color:var(--success);">${todayData.record.actual_clock_in.substring(11, 16)}</span>
+                                <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; padding:10px; background:rgba(40,167,69,0.05); border:1px solid rgba(40,167,69,0.2); border-radius:10px; height:52px;">
+                                    <span style="font-size:10px; color:var(--success); font-weight:700; letter-spacing:0.5px;">出勤済</span>
+                                    <span style="font-size:16px; font-weight:700; color:var(--success);">${todayData.record.actual_clock_in.substring(11, 16)}</span>
                                 </div>
                             `}
                             
                             <!-- 退勤ボタン -->
-                            ${todayData.record?.actual_clock_in && !todayData.record?.actual_clock_out ? `
-                                <button class="btn" onclick="Dashboard.clockOut()" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:14px 20px; background: var(--accent-fire); color:white; font-weight:600; font-size:15px; border:none; border-radius:10px; transition: all 0.2s ease; cursor: pointer;">
-                                    <i data-lucide="square" style="width:14px; height:14px;"></i> 退勤打刻 (1タップ)
+                            ${!todayData.record?.actual_clock_in ? `
+                                <button class="btn" disabled style="display:flex; align-items:center; justify-content:center; gap:8px; padding:14px 20px; background:rgba(255,255,255,0.03); color:var(--text-muted); font-weight:600; font-size:15px; border-radius:10px; border:1px solid rgba(255,255,255,0.05); cursor:not-allowed; opacity:0.5; width:100%;">
+                                    <i data-lucide="log-out" style="width:18px; height:18px;"></i> 退勤する
+                                </button>
+                            ` : (!todayData.record?.actual_clock_out ? `
+                                <button class="btn" onclick="Dashboard.clockOut()" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:14px 20px; background: var(--accent-fire); color:white; font-weight:700; font-size:15px; border-radius:10px; border:none; cursor:pointer; box-shadow:0 4px 12px rgba(239, 68, 68, 0.2); transition:all 0.2s ease;">
+                                    <i data-lucide="log-out" style="width:18px; height:18px;"></i> 退勤する
                                 </button>
                             ` : `
-                                <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; padding:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.04); border-radius:10px; height:50px;">
-                                    <span style="font-size:11px; color:var(--text-muted);">退勤時刻</span>
-                                    <span style="font-size:15px; font-weight:600; color:${todayData.record?.actual_clock_out ? 'var(--text-primary)' : 'var(--text-muted)'};">
-                                        ${todayData.record?.actual_clock_out ? todayData.record.actual_clock_out.substring(11, 16) : '--:--'}
-                                    </span>
+                                <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; padding:10px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:10px; height:52px;">
+                                    <span style="font-size:10px; color:var(--text-muted);">退勤済</span>
+                                    <span style="font-size:16px; font-weight:700; color:var(--text-secondary);">${todayData.record.actual_clock_out.substring(11, 16)}</span>
                                 </div>
-                            `}
+                            `)}
                         </div>
                     </div>
                     
@@ -304,29 +306,8 @@ const Dashboard = {
                 </div>
                 
                 <!-- 管理者用サマリー (最上部) -->
-                <div class="stats-row" style="grid-column: 1 / -1; margin-bottom: 8px;">
-                    <div class="card stat-card">
-                        <div class="stat-icon primary"><i data-lucide="users"></i></div>
-                        <div class="stat-info">
-                            <span class="stat-label">管轄職員総数</span>
-                            <span class="stat-value">${adminStats.total_staff} 名</span>
-                        </div>
-                    </div>
-                    <div class="card stat-card">
-                        <div class="stat-icon success"><i data-lucide="user-check"></i></div>
-                        <div class="stat-info">
-                            <span class="stat-label">現在出勤(勤務中)</span>
-                            <span class="stat-value">${adminStats.working_now} 名</span>
-                        </div>
-                    </div>
-                    <div class="card stat-card">
-                        <div class="stat-icon"><i data-lucide="flame" style="color:var(--accent-fire)"></i></div>
-                        <div class="stat-info">
-                            <span class="stat-label">本日当務予定者</span>
-                            <span class="stat-value">${adminStats.scheduled_tou} 名</span>
-                        </div>
-                    </div>
-                    <div class="card stat-card" onclick="Portal.navigate('approvals')" style="cursor:pointer;">
+                <div class="stats-row" style="grid-column: 1 / -1; margin-bottom: 8px; max-width: 320px;">
+                    <div class="card stat-card" onclick="Portal.navigate('approvals')" style="cursor:pointer; margin:0;">
                         <div class="stat-icon orange" style="position:relative;">
                             <i data-lucide="alert-circle"></i>
                             ${adminStats.pending_approvals > 0 ? `<span style="position:absolute; top:-4px; right:-4px; background:var(--danger); width:12px; height:12px; border-radius:50%;"></span>` : ''}
@@ -367,29 +348,31 @@ const Dashboard = {
                         <div style="border-top:1px solid rgba(255,255,255,0.06); padding-top:16px; display:grid; grid-template-columns:1fr 1fr; gap:16px;">
                             <!-- 出勤ボタン -->
                             ${!todayData.record?.actual_clock_in ? `
-                                <button class="btn btn-primary" onclick="Dashboard.clockIn()" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:14px 20px; background: var(--primary-color); font-weight:600; font-size:15px; border-radius:10px; transition: all 0.2s ease; border: none; cursor: pointer;">
-                                    <i data-lucide="play" style="width:16px; height:16px;"></i> 出勤打刻 (1タップ)
+                                <button class="btn" onclick="Dashboard.clockIn()" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:14px 20px; background: var(--success); color:white; font-weight:700; font-size:15px; border-radius:10px; border:none; cursor:pointer; box-shadow:0 4px 12px rgba(40, 167, 69, 0.2); transition:all 0.2s ease;">
+                                    <i data-lucide="log-in" style="width:18px; height:18px;"></i> 出勤する
                                 </button>
                             ` : `
-                                <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; padding:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.04); border-radius:10px; height:50px;">
-                                    <span style="font-size:11px; color:var(--text-muted);">出勤時刻</span>
-                                    <span style="font-size:15px; font-weight:600; color:var(--success);">${todayData.record.actual_clock_in.substring(11, 16)}</span>
+                                <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; padding:10px; background:rgba(40,167,69,0.05); border:1px solid rgba(40,167,69,0.2); border-radius:10px; height:52px;">
+                                    <span style="font-size:10px; color:var(--success); font-weight:700; letter-spacing:0.5px;">出勤済</span>
+                                    <span style="font-size:16px; font-weight:700; color:var(--success);">${todayData.record.actual_clock_in.substring(11, 16)}</span>
                                 </div>
                             `}
                             
                             <!-- 退勤ボタン -->
-                            ${todayData.record?.actual_clock_in && !todayData.record?.actual_clock_out ? `
-                                <button class="btn" onclick="Dashboard.clockOut()" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:14px 20px; background: var(--accent-fire); color:white; font-weight:600; font-size:15px; border:none; border-radius:10px; transition: all 0.2s ease; cursor: pointer;">
-                                    <i data-lucide="square" style="width:14px; height:14px;"></i> 退勤打刻 (1タップ)
+                            ${!todayData.record?.actual_clock_in ? `
+                                <button class="btn" disabled style="display:flex; align-items:center; justify-content:center; gap:8px; padding:14px 20px; background:rgba(255,255,255,0.03); color:var(--text-muted); font-weight:600; font-size:15px; border-radius:10px; border:1px solid rgba(255,255,255,0.05); cursor:not-allowed; opacity:0.5; width:100%;">
+                                    <i data-lucide="log-out" style="width:18px; height:18px;"></i> 退勤する
+                                </button>
+                            ` : (!todayData.record?.actual_clock_out ? `
+                                <button class="btn" onclick="Dashboard.clockOut()" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:14px 20px; background: var(--accent-fire); color:white; font-weight:700; font-size:15px; border-radius:10px; border:none; cursor:pointer; box-shadow:0 4px 12px rgba(239, 68, 68, 0.2); transition:all 0.2s ease;">
+                                    <i data-lucide="log-out" style="width:18px; height:18px;"></i> 退勤する
                                 </button>
                             ` : `
-                                <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; padding:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.04); border-radius:10px; height:50px;">
-                                    <span style="font-size:11px; color:var(--text-muted);">退勤時刻</span>
-                                    <span style="font-size:15px; font-weight:600; color:${todayData.record?.actual_clock_out ? 'var(--text-primary)' : 'var(--text-muted)'};">
-                                        ${todayData.record?.actual_clock_out ? todayData.record.actual_clock_out.substring(11, 16) : '--:--'}
-                                    </span>
+                                <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; padding:10px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:10px; height:52px;">
+                                    <span style="font-size:10px; color:var(--text-muted);">退勤済</span>
+                                    <span style="font-size:16px; font-weight:700; color:var(--text-secondary);">${todayData.record.actual_clock_out.substring(11, 16)}</span>
                                 </div>
-                            `}
+                            `)}
                         </div>
                     </div>
 

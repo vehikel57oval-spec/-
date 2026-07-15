@@ -6,6 +6,73 @@ const { verifyToken, requireRole } = require('../middleware/auth');
 const { parseDate, getJapaneseHoliday, getHolidayType } = require('../utils/holidays');
 
 /**
+ * @route   GET /api/admin/staff/export
+ * @desc    現在の職員データをCSVでダウンロード
+ */
+router.get('/staff/export', verifyToken, requireRole('chief', 'admin', 'sysadmin'), (req, res) => {
+    try {
+        let query = `
+            SELECT s.employee_number, s.name, s.platoon, s.rank, s.position,
+                   s.has_large_license, s.is_paramedic, s.is_rescue, s.is_kikan,
+                   s.is_day_worker, s.role, s.annual_leave_balance,
+                   st.name as station_name
+            FROM staff s
+            JOIN stations st ON s.station_id = st.id
+            WHERE s.department_id = ? AND s.is_active = 1
+        `;
+        let params = [req.user.department_id];
+        if (req.user.role === 'chief') {
+            query += ' AND s.station_id = ?';
+            params.push(req.user.station_id);
+        }
+        query += ' ORDER BY st.id ASC, s.platoon ASC, s.employee_number ASC';
+        const staffList = db.prepare(query).all(...params);
+
+        // platoon コードを日本語に変換
+        const platoonMap = { '1bu': '1部', '2bu': '2部', '3bu': '3部', 'nikkin': '日勤' };
+        // role コードを日本語に変換
+        const roleMap = { 'staff': '一般職員', 'chief': '当直長', 'admin': '本部管理者', 'sysadmin': 'システム管理者' };
+
+        const header = '職員番号,氏名,勤務区分,階級,役職,大型免許,救命士,救助員,機関員,日勤,システム役割,年休残日数,所属名';
+        const rows = staffList.map(s => {
+            const escapeCsv = (val) => {
+                const str = String(val == null ? '' : val);
+                if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                    return '"' + str.replace(/"/g, '""') + '"';
+                }
+                return str;
+            };
+            return [
+                escapeCsv(s.employee_number),
+                escapeCsv(s.name),
+                escapeCsv(platoonMap[s.platoon] || s.platoon),
+                escapeCsv(s.rank),
+                escapeCsv(s.position),
+                s.has_large_license ? '1' : '0',
+                s.is_paramedic ? '1' : '0',
+                s.is_rescue ? '1' : '0',
+                s.is_kikan ? '1' : '0',
+                s.is_day_worker ? '1' : '0',
+                escapeCsv(roleMap[s.role] || s.role),
+                s.annual_leave_balance,
+                escapeCsv(s.station_name)
+            ].join(',');
+        });
+
+        // BOM + CSV
+        const bom = '\uFEFF';
+        const csv = bom + header + '\r\n' + rows.join('\r\n') + '\r\n';
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename="staff_export.csv"; filename*=UTF-8\'\'%E8%81%B7%E5%93%A1%E3%83%87%E3%83%BC%E3%82%BF.csv');
+        res.send(csv);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'CSVエクスポートに失敗しました。' });
+    }
+});
+
+/**
  * @route   GET /api/admin/staff
  * @desc    職員一覧の取得
  */

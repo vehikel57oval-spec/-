@@ -106,7 +106,7 @@ const Portal = {
                     
                     <form id="login-form">
                         <div class="form-group" style="margin-bottom: 20px;">
-                            <label class="form-label" for="department-code">消防本部</label>
+                            <label class="form-label" for="department-code">所属名</label>
                             <div class="input-with-icon">
                                 <i data-lucide="building" class="input-icon"></i>
                                 <select class="form-input" id="department-code" required style="padding-left:48px; -webkit-appearance:none; -moz-appearance:none; appearance:none;">
@@ -1015,19 +1015,19 @@ const Portal = {
                 <div style="background:var(--primary-glow); padding:12px 16px; border-radius:var(--radius-sm); border:1px solid var(--primary-color); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                     <div style="font-size:13px; color:var(--text-secondary); line-height:1.5;">
                         <strong>入力手順:</strong><br>
-                        1. テンプレートCSVをダウンロードします。<br>
-                        2. 項目に合わせて職員情報を入力し、CSVファイルとして保存します。<br>
+                        1. 現在の職員データをCSVでダウンロードします。<br>
+                        2. CSVを参考に職員情報を追加・編集し、保存します。<br>
                         3. 文字コードを選択し、作成したCSVファイルをアップロードしてください。
                     </div>
-                    <button class="btn btn-primary" style="padding:8px 16px; font-size:12px;" onclick="Portal.downloadCSVTemplate()">
-                        <i data-lucide="download" style="width:14px;height:14px;"></i> テンプレートを保存
+                    <button class="btn btn-primary" style="padding:8px 16px; font-size:12px;" onclick="Portal.downloadStaffCSV()">
+                        <i data-lucide="download" style="width:14px;height:14px;"></i> 現在の職員データをCSV保存
                     </button>
                 </div>
                 
                 <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
                     <div class="form-group" style="flex:1; min-width:200px;">
                         <label class="form-label" style="font-size:11px;">文字コード (Excelで編集した場合は Shift_JIS)</label>
-                        <select id="csv-modal-encoding" class="form-input" style="padding-left:12px; height:36px; font-size:13px;">
+                        <select id="csv-modal-encoding" class="form-input" style="padding:0 12px; height:36px; font-size:13px;">
                             <option value="shift-jis">Shift_JIS (Excel形式)</option>
                             <option value="utf-8">UTF-8 (標準テキスト形式)</option>
                         </select>
@@ -1081,19 +1081,11 @@ const Portal = {
         if (typeof lucide !== 'undefined') lucide.createIcons();
     },
 
-    downloadCSVTemplate() {
-        const headers = '職員番号,氏名,勤務区分,階級,役職,大型免許,救命士,救助員,機関員,日勤,システム役割,年休残日数,所属署所ID\r\n';
-        const sampleRow = '1001,消防 太郎,1bu,消防士長,消防隊,1,1,0,1,0,user,20.0,1\r\n';
-        const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
-        const blob = new Blob([bom, headers + sampleRow], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.setAttribute('download', '消防職員インポートテンプレート.csv');
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+    downloadStaffCSV() {
+        window.location.href = '/api/admin/staff/export';
+        setTimeout(() => {
+            Portal.showToast('職員データのCSVダウンロードが完了しました。', 'success');
+        }, 500);
     },
 
     async handleCSVModalFile(event) {
@@ -1257,7 +1249,7 @@ const Portal = {
             'is_day_worker': ['日勤', 'is_day_worker'],
             'role': ['システム役割(role)', 'システム役割', 'role'],
             'annual_leave_balance': ['年休残日数', 'annual_leave_balance'],
-            'station_id': ['所属署所ID(station_id)', '所属署所ID', 'station_id']
+            'station_id': ['所属名', '所属署所ID(station_id)', '所属署所ID', 'station_id', '所属']
         };
 
         const headerIndices = {};
@@ -1312,11 +1304,24 @@ const Portal = {
             const is_day_worker = parseInt(getVal('is_day_worker', '0')) ? 1 : 0;
             let role = getVal('role');
             const annual_leave_balance = parseFloat(getVal('annual_leave_balance', '20.0'));
-            const station_id = parseInt(getVal('station_id'));
+            
+            const station_raw = getVal('station_id');
+            let station_id = parseInt(station_raw);
+            if (isNaN(station_id)) {
+                // 所属名からIDへのマッピング
+                const stationMap = {
+                    '指宿消防署': 1, '指宿': 1, '本署': 1, '指宿市消防本部': 1,
+                    '山川開聞分遣所': 2, '山川': 2, '開聞': 2,
+                    '頴娃分遣所': 3, '頴娃': 3,
+                    '指令センター': 4, '指令': 4
+                };
+                const cleanName = station_raw.trim();
+                station_id = stationMap[cleanName] || NaN;
+            }
 
-            if (platoon === '1部' || platoon === '第1小隊' || platoon === '1bu') platoon = '1bu';
-            else if (platoon === '2部' || platoon === '第2小隊' || platoon === '2bu') platoon = '2bu';
-            else if (platoon === '3部' || platoon === '第3小隊' || platoon === '3bu') platoon = '3bu';
+            if (platoon === '1部' || platoon === '第1小隊' || platoon === '1bu' || platoon === '1隊' || platoon === 'A日') platoon = '1bu';
+            else if (platoon === '2部' || platoon === '第2小隊' || platoon === '2bu' || platoon === '2隊' || platoon === 'B日') platoon = '2bu';
+            else if (platoon === '3部' || platoon === '第3小隊' || platoon === '3bu' || platoon === '3隊' || platoon === 'C日') platoon = '3bu';
             else if (platoon === '日勤者' || platoon === '日勤' || platoon === 'nikkin') platoon = 'nikkin';
 
             if (role === '一般職員' || role === '一般' || role === 'staff') role = 'staff';
